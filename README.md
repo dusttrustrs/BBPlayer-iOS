@@ -18,7 +18,7 @@
 
 > 📌 **项目说明**：本项目基于官方开源项目 [bbplayer-app/BBPlayer](https://github.com/bbplayer-app/BBPlayer) 进行维护与构建，专注于 **iOS 平台的兼容性修复、启动稳定性优化以及持续的 IPA 构建打包**。
 
-**[前往官网查看更多详情和上手指南 ➔](https://bbplayer.roitium.com)**
+**[前往上游项目原作者官网查看更多详情和上手指南 ➔](https://bbplayer.roitium.com)**
 
 ---
 
