@@ -322,6 +322,335 @@ jobs:
             fs.writeFileSync(modulePath, mod, "utf8");
             console.log("✅ 已为 ExpoOrpheusModule.swift 补全 getLruCachedUris 等缺失原生方法与属性");
           }
+          // (f) 为 iOS 实现原生 BootSplashVideoView 视频播放组件与模块 (基于 AVPlayer / AVPlayerLayer)，兼容开屏与主题素材视频播放
+          const bootSplashSwiftPath = "packages/orpheus/ios/BootSplashVideoView.swift";
+          const bootSplashSwiftLines = [
+            'import UIKit',
+            'import AVFoundation',
+            'import ExpoModulesCore',
+            '',
+            'public class BootSplashVideoView: ExpoView {',
+            '    private var player: AVPlayer?',
+            '    private var playerLayer: AVPlayerLayer?',
+            '    private var endObserver: Any?',
+            '    private var statusObserver: NSKeyValueObservation?',
+            '',
+            '    private var currentUri: String?',
+            '    private var autoPlay: Bool = true',
+            '    private var loop: Bool = false',
+            '    private var muted: Bool = true',
+            '    private var contentFit: String = "cover"',
+            '',
+            '    public let onPlaybackEnd = EventDispatcher()',
+            '    public let onPlaybackError = EventDispatcher()',
+            '',
+            '    public required init(appContext: AppContext? = nil) {',
+            '        super.init(appContext: appContext)',
+            '        backgroundColor = .clear',
+            '    }',
+            '',
+            '    public override func layoutSubviews() {',
+            '        super.layoutSubviews()',
+            '        CATransaction.begin()',
+            '        CATransaction.setDisableActions(true)',
+            '        playerLayer?.frame = bounds',
+            '        CATransaction.commit()',
+            '    }',
+            '',
+            '    private func parseUrl(from uriString: String?) -> URL? {',
+            '        guard let uri = uriString?.trimmingCharacters(in: .whitespacesAndNewlines), !uri.isEmpty else {',
+            '            return nil',
+            '        }',
+            '        if uri.hasPrefix("file://") {',
+            '            return URL(string: uri)',
+            '        }',
+            '        if uri.hasPrefix("http://") || uri.hasPrefix("https://") {',
+            '            return URL(string: uri)',
+            '        }',
+            '        if uri.hasPrefix("/") {',
+            '            return URL(fileURLWithPath: uri)',
+            '        }',
+            '        let filename = (uri as NSString).lastPathComponent',
+            '        let name = (filename as NSString).deletingPathExtension',
+            '        let ext = (filename as NSString).pathExtension',
+            '        if let bundleUrl = Bundle.main.url(forResource: name, withExtension: ext.isEmpty ? nil : ext) {',
+            '            return bundleUrl',
+            '        }',
+            '        return URL(fileURLWithPath: uri)',
+            '    }',
+            '',
+            '    private func applyChanges() {',
+            '        guard let uri = currentUri, let url = parseUrl(from: uri) else {',
+            '            cleanup()',
+            '            return',
+            '        }',
+            '        cleanup()',
+            '        let asset = AVURLAsset(url: url)',
+            '        let item = AVPlayerItem(asset: asset)',
+            '        let newPlayer = AVPlayer(playerItem: item)',
+            '        newPlayer.isMuted = self.muted',
+            '        if #available(iOS 10.0, *) {',
+            '            newPlayer.automaticallyWaitsToMinimizeStalling = false',
+            '        }',
+            '        newPlayer.actionAtItemEnd = .none',
+            '        let layer = AVPlayerLayer(player: newPlayer)',
+            '        layer.videoGravity = (contentFit == "contain") ? .resizeAspect : .resizeAspectFill',
+            '        layer.frame = bounds',
+            '        self.layer.addSublayer(layer)',
+            '        self.player = newPlayer',
+            '        self.playerLayer = layer',
+            '        endObserver = NotificationCenter.default.addObserver(',
+            '            forName: .AVPlayerItemDidPlayToEndTime,',
+            '            object: item,',
+            '            queue: .main',
+            '        ) { [weak self] _ in',
+            '            guard let self = self else { return }',
+            '            if self.loop {',
+            '                self.player?.seek(to: .zero)',
+            '                self.player?.play()',
+            '            } else {',
+            '                self.onPlaybackEnd([:])',
+            '            }',
+            '        }',
+            '        statusObserver = item.observe(\\.status, options: [.new]) { [weak self] playerItem, _ in',
+            '            guard let self = self else { return }',
+            '            if playerItem.status == .failed {',
+            '                let errorMsg = playerItem.error?.localizedDescription ?? "播放失败"',
+            '                self.onPlaybackError(["message": errorMsg])',
+            '            }',
+            '        }',
+            '        if autoPlay {',
+            '            newPlayer.play()',
+            '        }',
+            '    }',
+            '',
+            '    public func setSource(_ uri: String?) {',
+            '        if currentUri != uri {',
+            '            currentUri = uri',
+            '            applyChanges()',
+            '        }',
+            '    }',
+            '    public func setAutoPlay(_ play: Bool) {',
+            '        autoPlay = play',
+            '        if play { player?.play() }',
+            '    }',
+            '    public func setLoop(_ l: Bool) { loop = l }',
+            '    public func setMuted(_ m: Bool) {',
+            '        muted = m',
+            '        player?.isMuted = m',
+            '    }',
+            '    public func setContentFit(_ fit: String) {',
+            '        contentFit = fit',
+            '        playerLayer?.videoGravity = (fit == "contain") ? .resizeAspect : .resizeAspectFill',
+            '    }',
+            '    public func replay() {',
+            '        player?.seek(to: .zero)',
+            '        player?.play()',
+            '    }',
+            '    public func cleanup() {',
+            '        if let observer = endObserver {',
+            '            NotificationCenter.default.removeObserver(observer)',
+            '            endObserver = nil',
+            '        }',
+            '        statusObserver?.invalidate()',
+            '        statusObserver = nil',
+            '        player?.pause()',
+            '        player = nil',
+            '        playerLayer?.removeFromSuperlayer()',
+            '        playerLayer = nil',
+            '    }',
+            '    deinit { cleanup() }',
+            '}'
+          ].join('\n');
+          fs.writeFileSync(bootSplashSwiftPath, bootSplashSwiftLines, "utf8");
+
+          const bootSplashModuleSwiftPath = "packages/orpheus/ios/BBPlayerBootSplashVideoModule.swift";
+          const bootSplashModuleSwiftLines = [
+            'import ExpoModulesCore',
+            '',
+            'public class BBPlayerBootSplashVideoModule: Module {',
+            '    public func definition() -> ModuleDefinition {',
+            '        Name("BBPlayerBootSplashVideo")',
+            '        View(BootSplashVideoView.self) {',
+            '            Prop("sourceUri") { (view: BootSplashVideoView, sourceUri: String?) in',
+            '                view.setSource(sourceUri)',
+            '            }',
+            '            Prop("autoPlay") { (view: BootSplashVideoView, autoPlay: Bool?) in',
+            '                view.setAutoPlay(autoPlay ?? true)',
+            '            }',
+            '            Prop("loop") { (view: BootSplashVideoView, loop: Bool?) in',
+            '                view.setLoop(loop ?? false)',
+            '            }',
+            '            Prop("muted") { (view: BootSplashVideoView, muted: Bool?) in',
+            '                view.setMuted(muted ?? true)',
+            '            }',
+            '            Prop("contentFit") { (view: BootSplashVideoView, contentFit: String?) in',
+            '                view.setContentFit(contentFit ?? "cover")',
+            '            }',
+            '            Events("onPlaybackEnd", "onPlaybackError")',
+            '            AsyncFunction("replay") { (view: BootSplashVideoView) in',
+            '                view.replay()',
+            '            }',
+            '        }',
+            '    }',
+            '}'
+          ].join('\n');
+          fs.writeFileSync(bootSplashModuleSwiftPath, bootSplashModuleSwiftLines, "utf8");
+
+          const orpheusConfigPath = "packages/orpheus/expo-module.config.json";
+          if (fs.existsSync(orpheusConfigPath)) {
+            const orpheusConfig = JSON.parse(fs.readFileSync(orpheusConfigPath, "utf8"));
+            if (!orpheusConfig.ios.modules.includes("BBPlayerBootSplashVideoModule")) {
+              orpheusConfig.ios.modules.push("BBPlayerBootSplashVideoModule");
+              fs.writeFileSync(orpheusConfigPath, JSON.stringify(orpheusConfig, null, 2), "utf8");
+            }
+          }
+
+          let modSource = fs.readFileSync(modulePath, "utf8");
+          if (!modSource.includes("View(BootSplashVideoView.self)")) {
+            const viewRegCode = [
+              '        View(BootSplashVideoView.self) {',
+              '            Prop("sourceUri") { (view: BootSplashVideoView, sourceUri: String?) in',
+              '                view.setSource(sourceUri)',
+              '            }',
+              '            Prop("autoPlay") { (view: BootSplashVideoView, autoPlay: Bool?) in',
+              '                view.setAutoPlay(autoPlay ?? true)',
+              '            }',
+              '            Prop("loop") { (view: BootSplashVideoView, loop: Bool?) in',
+              '                view.setLoop(loop ?? false)',
+              '            }',
+              '            Prop("muted") { (view: BootSplashVideoView, muted: Bool?) in',
+              '                view.setMuted(muted ?? true)',
+              '            }',
+              '            Prop("contentFit") { (view: BootSplashVideoView, contentFit: String?) in',
+              '                view.setContentFit(contentFit ?? "cover")',
+              '            }',
+              '            Events("onPlaybackEnd", "onPlaybackError")',
+              '            AsyncFunction("replay") { (view: BootSplashVideoView) in',
+              '                view.replay()',
+              '            }',
+              '        }'
+            ].join('\n');
+            const endDefIdx = modSource.lastIndexOf('  }');
+            if (endDefIdx !== -1) {
+              modSource = modSource.slice(0, endDefIdx) + '\n' + viewRegCode + '\n' + modSource.slice(endDefIdx);
+              fs.writeFileSync(modulePath, modSource, "utf8");
+            }
+          }
+
+          const nativeBootSplashTsxPath = "packages/native/src/BootSplashVideoView.tsx";
+          const nativeBootSplashTsxLines = [
+            "import { requireNativeView } from 'expo'",
+            "import { createElement, forwardRef, useEffect, useImperativeHandle, useRef } from 'react'",
+            "import { Platform, View, type NativeMethods, type ViewProps } from 'react-native'",
+            "",
+            "const NativeBootSplashVideoView = (() => {",
+            "\tif (Platform.OS === 'android') {",
+            "\t\ttry {",
+            "\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t'BBPlayerBootSplashVideo',",
+            "\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t)",
+            "\t\t} catch {",
+            "\t\t\treturn null",
+            "\t\t}",
+            "\t}",
+            "\tif (Platform.OS === 'ios') {",
+            "\t\ttry {",
+            "\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t'BBPlayerBootSplashVideo',",
+            "\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t)",
+            "\t\t} catch {",
+            "\t\t\ttry {",
+            "\t\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t\t'Orpheus',",
+            "\t\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t\t)",
+            "\t\t\t} catch {",
+            "\t\t\t\treturn null",
+            "\t\t\t}",
+            "\t\t}",
+            "\t}",
+            "\treturn null",
+            "})()",
+            "",
+            "export interface BootSplashVideoViewProps extends ViewProps {",
+            "\tsourceUri: string | null",
+            "\tautoPlay?: boolean",
+            "\tloop?: boolean",
+            "\tmuted?: boolean",
+            "\tcontentFit?: 'contain' | 'cover'",
+            "\tonPlaybackEnd?: () => void",
+            "\tonPlaybackError?: (event: {",
+            "\t\tnativeEvent: { extra?: number; message?: string; what?: number }",
+            "\t}) => void",
+            "}",
+            "",
+            "export interface BootSplashVideoViewRef extends NativeMethods {",
+            "\treplay(): Promise<void>",
+            "}",
+            "",
+            "export const BootSplashVideoView = forwardRef<",
+            "\tBootSplashVideoViewRef,",
+            "\tBootSplashVideoViewProps",
+            ">(function BootSplashVideoView(props, ref) {",
+            "\tconst innerRef = useRef<any>(null)",
+            "",
+            "\tuseImperativeHandle(ref, () => ({",
+            "\t\treplay: async () => {",
+            "\t\t\tif (innerRef.current?.replay) {",
+            "\t\t\t\tawait innerRef.current.replay()",
+            "\t\t\t}",
+            "\t\t},",
+            "\t} as unknown as BootSplashVideoViewRef))",
+            "",
+            "\tif (!NativeBootSplashVideoView) {",
+            "\t\tuseEffect(() => {",
+            "\t\t\tconst timer = setTimeout(() => {",
+            "\t\t\t\tprops.onPlaybackEnd?.()",
+            "\t\t\t}, 1000)",
+            "\t\t\treturn () => clearTimeout(timer)",
+            "\t\t}, [props.onPlaybackEnd])",
+            "",
+            "\t\treturn (",
+            "\t\t\t<View",
+            "\t\t\t\tstyle={[",
+            "\t\t\t\t\tprops.style,",
+            "\t\t\t\t\t{ backgroundColor: 'black' },",
+            "\t\t\t\t]}",
+            "\t\t\t\ttestID='BootSplashVideoViewFallback'",
+            "\t\t\t/>",
+            "\t\t)",
+            "\t}",
+            "",
+            "\treturn createElement(NativeBootSplashVideoView, {",
+            "\t\t...props,",
+            "\t\tref: innerRef,",
+            "\t})",
+            "})"
+          ].join('\n');
+          fs.writeFileSync(nativeBootSplashTsxPath, nativeBootSplashTsxLines, "utf8");
+          console.log("✅ 已为 iOS 端注入原生 BootSplashVideoView (AVPlayer / AVPlayerLayer) 及 TS 桥接组件");
+          fs.writeFileSync("packages/native/src/BootSplashVideoView.tsx", "import { requireNativeView } from 'expo'\nimport { createElement, forwardRef, useEffect, useImperativeHandle, useRef } from 'react'\nimport { Platform, View, type NativeMethods, type ViewProps } from 'react-native'\n\nconst NativeBootSplashVideoView = (() => {\n\tif (Platform.OS === 'android') {\n\t\ttry {\n\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t'BBPlayerBootSplashVideo',\n\t\t\t\t'BootSplashVideoView',\n\t\t\t)\n\t\t} catch {\n\t\t\treturn null\n\t\t}\n\t}\n\tif (Platform.OS === 'ios') {\n\t\ttry {\n\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t'BBPlayerBootSplashVideo',\n\t\t\t\t'BootSplashVideoView',\n\t\t\t)\n\t\t} catch {\n\t\t\ttry {\n\t\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t\t'Orpheus',\n\t\t\t\t\t'BootSplashVideoView',\n\t\t\t\t)\n\t\t\t} catch {\n\t\t\t\treturn null\n\t\t\t}\n\t\t}\n\t}\n\treturn null\n})()\n\nexport interface BootSplashVideoViewProps extends ViewProps {\n\tsourceUri: string | null\n\tautoPlay?: boolean\n\tloop?: boolean\n\tmuted?: boolean\n\tcontentFit?: 'contain' | 'cover'\n\tonPlaybackEnd?: () => void\n\tonPlaybackError?: (event: {\n\t\tnativeEvent: { extra?: number; message?: string; what?: number }\n\t}) => void\n}\n\nexport interface BootSplashVideoViewRef extends NativeMethods {\n\treplay(): Promise<void>\n}\n\nexport const BootSplashVideoView = forwardRef<\n\tBootSplashVideoViewRef,\n\tBootSplashVideoViewProps\n>(function BootSplashVideoView(props, ref) {\n\tconst innerRef = useRef<{ replay?: () => Promise<void> } | null>(null)\n\tconst { onPlaybackEnd } = props\n\n\tuseImperativeHandle(\n\t\tref,\n\t\t() =>\n\t\t\t({\n\t\t\t\treplay: async () => {\n\t\t\t\t\tif (innerRef.current?.replay) {\n\t\t\t\t\t\tawait innerRef.current.replay()\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t}) as unknown as BootSplashVideoViewRef,\n\t)\n\n\tuseEffect(() => {\n\t\tif (NativeBootSplashVideoView) return\n\t\tconst timer = setTimeout(() => {\n\t\t\tonPlaybackEnd?.()\n\t\t}, 1000)\n\t\treturn () => clearTimeout(timer)\n\t}, [onPlaybackEnd])\n\n\tif (!NativeBootSplashVideoView) {\n\t\treturn (\n\t\t\t<View\n\t\t\t\tstyle={[props.style, { backgroundColor: 'black' }]}\n\t\t\t\ttestID='BootSplashVideoViewFallback'\n\t\t\t/>\n\t\t)\n\t}\n\n\treturn createElement(NativeBootSplashVideoView, {\n\t\t...props,\n\t\t// @ts-expect-error -- native view ref forwarding\n\t\tref: innerRef,\n\t})\n})\n", "utf8");
+          fs.writeFileSync("packages/orpheus/ios/PhotoPickerHelper.swift", "import UIKit\nimport PhotosUI\n\n@available(iOS 14.0, *)\npublic final class PhotoPickerHelper: NSObject, PHPickerViewControllerDelegate, UIAdaptivePresentationControllerDelegate {\n    public static let shared = PhotoPickerHelper()\n    private var activeCompletion: ((String?) -> Void)?\n\n    public func pickSingleImage(completion: @escaping (String?) -> Void) {\n        DispatchQueue.main.async {\n            if let prev = self.activeCompletion {\n                self.activeCompletion = nil\n                prev(nil)\n            }\n\n            guard let topVC = Self.topViewController() else {\n                completion(nil)\n                return\n            }\n\n            var config = PHPickerConfiguration()\n            config.filter = .images\n            config.selectionLimit = 1\n            config.preferredAssetRepresentationMode = .compatible\n\n            let picker = PHPickerViewController(configuration: config)\n            picker.delegate = self\n            picker.presentationController?.delegate = self\n\n            self.activeCompletion = completion\n            topVC.present(picker, animated: true)\n        }\n    }\n\n    public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {\n        picker.dismiss(animated: true)\n\n        guard let result = results.first else {\n            finish(with: nil)\n            return\n        }\n\n        let provider = result.itemProvider\n        if provider.canLoadObject(ofClass: UIImage.self) {\n            provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in\n                guard let self = self, let image = object as? UIImage else {\n                    self?.finish(with: nil)\n                    return\n                }\n                let normalized = Self.normalizeImage(image, maxDimension: 2560)\n                guard let data = normalized.jpegData(compressionQuality: 0.9) else {\n                    self.finish(with: nil)\n                    return\n                }\n                let fileName = \"picked_bg_\\(Int(Date().timeIntervalSince1970 * 1000))_\\(UUID().uuidString.prefix(6)).jpg\"\n                let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(fileName)\n                do {\n                    try data.write(to: tempURL, options: .atomic)\n                    self.finish(with: tempURL.absoluteString)\n                } catch {\n                    self.finish(with: nil)\n                }\n            }\n        } else {\n            finish(with: nil)\n        }\n    }\n\n    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {\n        finish(with: nil)\n    }\n\n    private func finish(with uri: String?) {\n        DispatchQueue.main.async {\n            if let callback = self.activeCompletion {\n                self.activeCompletion = nil\n                callback(uri)\n            }\n        }\n    }\n\n    private static func normalizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {\n        let size = image.size\n        guard size.width > 0, size.height > 0 else { return image }\n        let maxSide = max(size.width, size.height)\n        let scaleFactor = maxSide > maxDimension ? (maxDimension / maxSide) : 1.0\n        let targetSize = CGSize(width: round(size.width * scaleFactor), height: round(size.height * scaleFactor))\n\n        let format = UIGraphicsImageRendererFormat.default()\n        format.scale = 1.0\n        format.opaque = true\n        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)\n        return renderer.image { _ in\n            image.draw(in: CGRect(origin: .zero, size: targetSize))\n        }\n    }\n\n    private static func topViewController() -> UIViewController? {\n        let scenes = UIApplication.shared.connectedScenes\n            .compactMap { $0 as? UIWindowScene }\n            .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }\n\n        let keyWindow = scenes\n            .flatMap { $0.windows }\n            .first { $0.isKeyWindow } ?? scenes.flatMap { $0.windows }.first\n\n        var top = keyWindow?.rootViewController\n        while let presented = top?.presentedViewController, !presented.isBeingDismissed {\n            top = presented\n        }\n        return top\n    }\n}\n", "utf8");
+          let modForPhoto = fs.readFileSync(modulePath, "utf8");
+          if (!modForPhoto.includes("pickPhotoFromLibrary")) {
+            const photoFuncCode = [
+              '        AsyncFunction("pickPhotoFromLibrary") { (promise: Promise) in',
+              '            PhotoPickerHelper.shared.pickSingleImage { uri in',
+              '                if let uri = uri {',
+              '                    promise.resolve(uri)',
+              '                } else {',
+              '                    promise.resolve()',
+              '                }',
+              '            }',
+              '        }'
+            ].join("\n");
+            modForPhoto = modForPhoto.replace("View(BootSplashVideoView.self) {", photoFuncCode + "\n\n        View(BootSplashVideoView.self) {");
+            fs.writeFileSync(modulePath, modForPhoto, "utf8");
+            console.log("✅ 已在 ExpoOrpheusModule.swift 中注入原生相册选择器 pickPhotoFromLibrary");
+          }
           EOF
       - name: 🩹 修复 iOS 运行时崩溃、播放器、后台播放与菜单弹窗组件异常
         run: |
@@ -1855,7 +2184,7 @@ jobs:
             fs.writeFileSync(myTabPath, myTabCode, "utf8");
             console.log("✅ 已微调 (tabs)/my.tsx 底部滚动安全间距为 haveTrack ? 150 : 90");
           }
-          // 15. 将检查更新替换为 dusttrustrs/BBPlayer-iOS-Package 的 GitHub Release 更新源。
+          // 15. 将检查更新替换为 dusttrustrs/BBPlayer-iOS 的 GitHub Release 更新源。
           // 构建版本从 workflow_dispatch 的 RELEASE_VERSION 获取，并确保版本段按数字比较。
           const updateSvcPath = "apps/mobile/src/lib/services/updateService.ts";
           if (fs.existsSync(updateSvcPath)) {
@@ -1891,7 +2220,7 @@ jobs:
               "        const res = await Sentry.startSpan(",
               "            { name: 'http:fetch:update-manifest', op: 'http' },",
               "            () =>",
-              "                fetch('https://api.github.com/repos/dusttrustrs/BBPlayer-iOS-Package/releases/latest', {",
+              "                fetch('https://api.github.com/repos/dusttrustrs/BBPlayer-iOS/releases/latest', {",
               "                    cache: 'no-store',",
               "                    headers: {",
               "                        'User-Agent': 'BBPlayer-iOS',",
@@ -1909,7 +2238,7 @@ jobs:
               "        const url =",
               "            typeof data.html_url === 'string'",
               "                ? data.html_url",
-              "                : 'https://github.com/dusttrustrs/BBPlayer-iOS-Package/releases/latest'",
+              "                : 'https://github.com/dusttrustrs/BBPlayer-iOS/releases/latest'",
               "        const notes = typeof data.body === 'string' ? data.body : ''",
               "        const releaseInfo: ReleaseInfo = {",
               "            version,",
@@ -1944,7 +2273,7 @@ jobs:
             const manifestRegex = new RegExp("updateManifestUrl:\\s*['\"][^'\"]+['\"]");
             appCfgCode = appCfgCode.replace(
               manifestRegex,
-              "updateManifestUrl: 'https://api.github.com/repos/dusttrustrs/BBPlayer-iOS-Package/releases/latest'"
+              "updateManifestUrl: 'https://api.github.com/repos/dusttrustrs/BBPlayer-iOS/releases/latest'"
             );
             fs.writeFileSync(appConfigPath, appCfgCode, "utf8");
             console.log("✅ 已配置 app.config.ts updateManifestUrl");
@@ -4951,7 +5280,7 @@ jobs:
             );
             libCode = libCode.replace(
               /marginBottom:\s*\d+,\s*marginTop:\s*\d+,/,
-              "marginBottom: 12,\n\t\t\t\t\t\t\t\tmarginTop: 0,\n\t\t\t\t\t\t\t\televation: 0,\n\t\t\t\t\t\t\t\tshadowOpacity: 0,"
+              "marginBottom: 12,\n\t\t\t\t\t\t\t\tmarginTop: 0,\n\t\t\t\t\t\t\t\televation: 0,\n\t\t\t\t\t\t\t\tshadowOpacity: 0,\n\t\t\t\t\t\t\t\tborderBottomWidth: 0,\n\t\t\t\t\t\t\t\tborderBottomColor: 'transparent',"
             );
             libCode = libCode.replace(
               "indicatorStyle={{ backgroundColor: colors.onSecondaryContainer }}",
@@ -4993,6 +5322,142 @@ jobs:
             );
             fs.writeFileSync(searchPagePath, searchCode, "utf8");
             console.log("✅ 已将搜索页标题与搜索框位置适度下移，并保持与音乐库栏目和装扮背景完全对齐");
+          }
+          const myPagePath = "apps/mobile/src/app/(tabs)/my.tsx";
+          if (fs.existsSync(myPagePath)) {
+            let myCode = fs.readFileSync(myPagePath, "utf8");
+            myCode = myCode.replace(
+              /<SkinAppbarBackground\s+height=\{insets\.top\s*\+\s*\d+\}\s*\/>/,
+              "<SkinAppbarBackground height={insets.top + 116} />"
+            );
+            myCode = myCode.replace(
+              /paddingTop:\s*insets\.top\s*\+\s*\d+,/,
+              "paddingTop: insets.top + 6,"
+            );
+            myCode = myCode.replace(
+              /header:\s*\{\s*paddingHorizontal:\s*16,\s*paddingBottom:\s*\d+,\s*flexDirection:\s*'row'/,
+              "header: {\n\t\tpaddingHorizontal: 16,\n\t\tpaddingBottom: 8,\n\t\tflexDirection: 'row'"
+            );
+            const oldAccountsPattern = /<ScrollView[\s\S]*?<View style=\{styles\.accounts\}>[\s\S]*?<\/View>\s*<ListeningRecordSection \/>/;
+            const newProfileBarLines = [
+              "<View style={styles.profileBarContainer}>",
+              "\t<Touchable",
+              "\t\taccessibilityRole='button'",
+              "\t\taccessibilityLabel={",
+              "\t\t\thasCookie ? '管理 Bilibili 账号' : '登录 Bilibili 账号'",
+              "\t\t}",
+              "\t\tstyle={[",
+              "\t\t\tstyles.profileBar,",
+              "\t\t\t{",
+              "\t\t\t\tbackgroundColor:",
+              "\t\t\t\t\tactiveSkin && !useAppStore.getState().settings.pureWhiteBackground",
+              "\t\t\t\t\t\t? colors.elevation.level2",
+              "\t\t\t\t\t\t: colors.surfaceVariant,",
+              "\t\t\t\t},",
+              "\t\t]}",
+              "\t\tonPress={() => router.navigate('/settings/bilibili-account')}",
+              "\t>",
+              "\t\t<View style={styles.avatarWrapper}>",
+              "\t\t\t<Image",
+              "\t\t\t\tstyle={styles.avatar}",
+              "\t\t\t\tsource={",
+              "\t\t\t\t\tprofile?.face",
+              "\t\t\t\t\t\t? { uri: profile.face }",
+              "\t\t\t\t\t\t: require('../../../assets/images/bilibili-default-avatar.jpg')",
+              "\t\t\t\t}",
+              "\t\t\t\tcachePolicy='disk'",
+              "\t\t\t/>",
+              "\t\t\t{avatarFrame && (",
+              "\t\t\t\t<Image",
+              "\t\t\t\t\tsource={avatarFrame}",
+              "\t\t\t\t\tstyle={styles.avatarFrame}",
+              "\t\t\t\t\tcontentFit='contain'",
+              "\t\t\t\t\tcachePolicy='memory-disk'",
+              "\t\t\t\t/>",
+              "\t\t\t)}",
+              "\t\t</View>",
+              "\t\t<View style={styles.profileText}>",
+              "\t\t\t<Text",
+              "\t\t\t\tvariant='titleMedium'",
+              "\t\t\t\tstyle={styles.bold}",
+              "\t\t\t\tnumberOfLines={1}",
+              "\t\t\t>",
+              "\t\t\t\t{hasCookie",
+              "\t\t\t\t\t? (profile?.name ?? 'Bilibili 用户')",
+              "\t\t\t\t\t: '登录 Bilibili'}",
+              "\t\t\t</Text>",
+              "\t\t\t<Text",
+              "\t\t\t\tvariant='bodySmall'",
+              "\t\t\t\tstyle={{ color: colors.onSurfaceVariant }}",
+              "\t\t\t\tnumberOfLines={1}",
+              "\t\t\t>",
+              "\t\t\t\t{hasCookie",
+              "\t\t\t\t\t? 'Bilibili 账号'",
+              "\t\t\t\t\t: '登录后使用收藏夹、关注与稍后再看'}",
+              "\t\t\t</Text>",
+              "\t\t</View>",
+              "\t\t{chevron()}",
+              "\t</Touchable>",
+              "</View>",
+              "<ScrollView",
+              "\tcontentContainerStyle={[",
+              "\t\tstyles.content,",
+              "\t\t{ paddingBottom: haveTrack ? 150 : 90 },",
+              "\t]}",
+              "\tshowsVerticalScrollIndicator={false}",
+              ">",
+              "\t<Touchable",
+              "\t\taccessibilityRole='button'",
+              "\t\taccessibilityLabel='BBPlayer 账号'",
+              "\t\tstyle={[",
+              "\t\t\tstyles.accountBar,",
+              "\t\t\t{",
+              "\t\t\t\tbackgroundColor: colors.surfaceVariant,",
+              "\t\t\t\tmarginBottom: 10,",
+              "\t\t\t},",
+              "\t\t]}",
+              "\t\tonPress={() => router.navigate('/settings/account')}",
+              "\t>",
+              "\t\t<Icon",
+              "\t\t\tsource='link-variant'",
+              "\t\t\tsize={20}",
+              "\t\t\tcolor={colors.onSurfaceVariant}",
+              "\t\t/>",
+              "\t\t<Text",
+              "\t\t\tvariant='titleSmall'",
+              "\t\t\tstyle={{ color: colors.onSurfaceVariant }}",
+              "\t\t>",
+              "\t\t\tBBPlayer 账号",
+              "\t\t</Text>",
+              "\t\t<Text",
+              "\t\t\tvariant='bodySmall'",
+              "\t\t\tstyle={[styles.accountStatus, { color: colors.onSurfaceVariant }]}",
+              "\t\t\tnumberOfLines={1}",
+              "\t\t>",
+              "\t\t\t{token ? (account?.name ?? '已登录') : '未登录'}",
+              "\t\t</Text>",
+              "\t\t{chevron()}",
+              "\t</Touchable>",
+              "\t<ListeningRecordSection />"
+            ].join("\n\t\t\t");
+
+            if (oldAccountsPattern.test(myCode)) {
+              myCode = myCode.replace(oldAccountsPattern, newProfileBarLines);
+            }
+
+            if (!myCode.includes("profileBar:")) {
+              myCode = myCode.replace(
+                "accounts: { paddingBottom: 8 },",
+                "profileBarContainer: { paddingHorizontal: 16, paddingBottom: 12 },\n\tprofileBar: { height: 56, paddingHorizontal: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },\n\tavatarWrapper: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },\n\tavatar: { width: 38, height: 38, borderRadius: 19 },\n\tavatarFrame: { position: 'absolute', width: 52, height: 52 },\n\tprofileText: { flex: 1, justifyContent: 'center', gap: 2 },"
+              );
+              myCode = myCode.replace(/profile:\s*\{[\s\S]*?minHeight:\s*104,\s*\},/, "");
+              myCode = myCode.replace(/profileText:\s*\{[\s\S]*?gap:\s*6\s*\},/, "");
+              myCode = myCode.replace(/avatarWrapper:\s*\{[\s\S]*?height:\s*64,\s*\},/, "");
+              myCode = myCode.replace(/avatar:\s*\{[\s\S]*?borderRadius:\s*32\s*\},/, "");
+              myCode = myCode.replace(/avatarFrame:\s*\{[\s\S]*?height:\s*86\s*\},/, "");
+            }
+            fs.writeFileSync(myPagePath, myCode, "utf8");
+            console.log("✅ 已在 (tabs)/my.tsx 中对齐高度 56 的账号卡片与 insets.top + 116 装扮背景");
           }
           // 38. 在「设置-外观与主题」中添加全局自定义主题色与背景色自适应开关
           const matColorsPath = "apps/mobile/src/lib/theme/material3Colors.ts";
@@ -5197,6 +5662,90 @@ jobs:
             }
           }
 
+          // 39. 在「设置-外观与主题-主题」中添加「自定义背景图片」按钮与弹窗，支持分界面/统一设置背景并与装扮无缝渐变融合
+          const appStoreTypesFile = "apps/mobile/src/types/core/appStore.ts";
+          if (fs.existsSync(appStoreTypesFile)) {
+            let tCode = fs.readFileSync(appStoreTypesFile, "utf8");
+            if (!tCode.includes("customBackgroundSearch")) {
+              tCode = tCode.replace(
+                "adaptiveBackground?: boolean",
+                "adaptiveBackground?: boolean\n\tcustomBackgroundSeparateTabs?: boolean\n\tcustomBackgroundSearch?: string | null\n\tcustomBackgroundLibrary?: string | null\n\tcustomBackgroundMy?: string | null"
+              );
+              fs.writeFileSync(appStoreTypesFile, tCode, "utf8");
+            }
+          }
+          const useAppStoreFile = "apps/mobile/src/hooks/stores/useAppStore.ts";
+          if (fs.existsSync(useAppStoreFile)) {
+            let sCode = fs.readFileSync(useAppStoreFile, "utf8");
+            if (!sCode.includes("customBackgroundSearch")) {
+              sCode = sCode.replace(
+                "adaptiveBackground: false,",
+                "adaptiveBackground: false,\n\t\t\t\t\tcustomBackgroundSeparateTabs: true,\n\t\t\t\t\tcustomBackgroundSearch: null,\n\t\t\t\t\tcustomBackgroundLibrary: null,\n\t\t\t\t\tcustomBackgroundMy: null,"
+              );
+              fs.writeFileSync(useAppStoreFile, sCode, "utf8");
+            }
+          }
+          fs.mkdirSync("apps/mobile/src/lib/theme", { recursive: true });
+          fs.writeFileSync("apps/mobile/src/lib/theme/customBackground.ts", "import { Orpheus } from '@bbplayer/orpheus'\nimport * as DocumentPicker from 'expo-document-picker'\nimport * as FileSystem from 'expo-file-system'\nimport { Platform } from 'react-native'\n\nconst CUSTOM_BG_DIR_NAME = 'custom_backgrounds'\n\nfunction getCustomBgDirectory(): FileSystem.Directory {\n\tconst dir = new FileSystem.Directory(\n\t\tFileSystem.Paths.document,\n\t\tCUSTOM_BG_DIR_NAME,\n\t)\n\tif (!dir.exists) {\n\t\tdir.create({ intermediates: true, idempotent: true })\n\t}\n\treturn dir\n}\n\n/**\n * 唤起系统相册选取单张图片（iOS 使用原生 PHPickerViewController 相册，Android 回退至图片选择器）\n */\nexport async function pickImageFromAlbum(): Promise<string | null> {\n\tconst orpheusAny = Orpheus as unknown as {\n\t\tpickPhotoFromLibrary?: () => Promise<string | null | undefined>\n\t}\n\n\tif (\n\t\tPlatform.OS === 'ios' &&\n\t\ttypeof orpheusAny.pickPhotoFromLibrary === 'function'\n\t) {\n\t\tconst pickedUri = await orpheusAny.pickPhotoFromLibrary()\n\t\treturn pickedUri && pickedUri.trim().length > 0 ? pickedUri : null\n\t}\n\n\tconst result = await DocumentPicker.getDocumentAsync({\n\t\ttype: 'image/*',\n\t\tcopyToCacheDirectory: true,\n\t\tmultiple: false,\n\t})\n\tif (result.canceled || result.assets.length === 0) {\n\t\treturn null\n\t}\n\treturn result.assets[0]?.uri ?? null\n}\n\n/**\n * 将选取的临时图片复制到 Documents/custom_backgrounds 持久化目录，返回相对文件名（避免 iOS 覆盖更新后沙盒 UUID 变更导致失效）\n */\nexport async function saveCustomBackgroundFile(\n\tsourceUri: string,\n\tslot: 'search' | 'library' | 'my' | 'unified',\n): Promise<string> {\n\tconst dir = getCustomBgDirectory()\n\tconst sourceFile = new FileSystem.File(sourceUri)\n\tconst rawExt = sourceUri.split('?')[0]?.split('.').pop()?.toLowerCase()\n\tconst ext =\n\t\trawExt && ['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(rawExt)\n\t\t\t? rawExt\n\t\t\t: 'jpg'\n\tconst fileName = `bg_${slot}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`\n\tconst destFile = new FileSystem.File(dir, fileName)\n\tif (destFile.exists) {\n\t\tdestFile.delete()\n\t}\n\tawait Promise.resolve(sourceFile.copy(destFile))\n\treturn fileName\n}\n\n/**\n * 将存储的文件名解析为当前沙盒下的真实可渲染 file:// URI\n */\nexport function resolveCustomBackgroundUri(\n\tsavedValue?: string | null,\n): string | null {\n\tif (!savedValue || !savedValue.trim()) return null\n\tconst trimmed = savedValue.trim()\n\tif (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {\n\t\treturn trimmed\n\t}\n\tconst fileName = trimmed.split('/').pop()\n\tif (!fileName) return null\n\ttry {\n\t\tconst dir = new FileSystem.Directory(\n\t\t\tFileSystem.Paths.document,\n\t\t\tCUSTOM_BG_DIR_NAME,\n\t\t)\n\t\tconst file = new FileSystem.File(dir, fileName)\n\t\tif (!file.exists) return null\n\t\treturn file.uri\n\t} catch {\n\t\treturn null\n\t}\n}\n\n/**\n * 清理不再被任何主页引用的历史背景图片缓存文件\n */\nexport function cleanupUnusedCustomBackgroundFiles(\n\tactiveValues: Array<string | null | undefined>,\n): void {\n\ttry {\n\t\tconst dir = new FileSystem.Directory(\n\t\t\tFileSystem.Paths.document,\n\t\t\tCUSTOM_BG_DIR_NAME,\n\t\t)\n\t\tif (!dir.exists) return\n\t\tconst keepSet = new Set(\n\t\t\tactiveValues\n\t\t\t\t.filter((v): v is string => Boolean(v && v.trim()))\n\t\t\t\t.map((v) => v.trim().split('/').pop() ?? ''),\n\t\t)\n\t\tconst entries = dir.list()\n\t\tfor (const entry of entries) {\n\t\t\tif (entry instanceof FileSystem.File && !keepSet.has(entry.name)) {\n\t\t\t\ttry {\n\t\t\t\t\tentry.delete()\n\t\t\t\t} catch {\n\t\t\t\t\t// ignore single file cleanup failure\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t} catch {\n\t\t// ignore directory cleanup failure\n\t}\n}\n", "utf8");
+          fs.mkdirSync("apps/mobile/src/features/theme", { recursive: true });
+          fs.writeFileSync("apps/mobile/src/features/theme/CustomBackgroundModal.tsx", "import { Image } from 'expo-image'\nimport { useEffect, useState } from 'react'\nimport { Pressable, StyleSheet, View } from 'react-native'\nimport { Dialog, Icon, Portal, Text, useTheme } from 'react-native-paper'\n\nimport AnimatedModalOverlay from '@/components/common/AnimatedModalOverlay'\nimport Button from '@/components/common/Button'\nimport UniversalSwitch from '@/components/common/UniversalSwitch'\nimport useAppStore from '@/hooks/stores/useAppStore'\nimport {\n\tcleanupUnusedCustomBackgroundFiles,\n\tpickImageFromAlbum,\n\tsaveCustomBackgroundFile,\n} from '@/lib/theme/customBackground'\nimport toast from '@/utils/toast'\n\ninterface CustomBackgroundModalProps {\n\tvisible: boolean\n\tonDismiss: () => void\n}\n\ntype TabSlot = 'search' | 'library' | 'my'\n\nconst TAB_SLOTS: Array<{ key: TabSlot; label: string }> = [\n\t{ key: 'search', label: '搜索' },\n\t{ key: 'library', label: '音乐库' },\n\t{ key: 'my', label: '我的' },\n]\n\nexport default function CustomBackgroundModal({\n\tvisible,\n\tonDismiss,\n}: CustomBackgroundModalProps) {\n\tconst { colors } = useTheme()\n\tconst settings = useAppStore((state) => state.settings)\n\tconst setSettings = useAppStore((state) => state.setSettings)\n\n\tconst [separateTabs, setSeparateTabs] = useState<boolean>(\n\t\tsettings.customBackgroundSeparateTabs ?? true,\n\t)\n\tconst [pickedSlots, setPickedSlots] = useState<Record<TabSlot, string | null>>(\n\t\t{\n\t\t\tsearch: null,\n\t\t\tlibrary: null,\n\t\t\tmy: null,\n\t\t},\n\t)\n\tconst [pickedUnified, setPickedUnified] = useState<string | null>(null)\n\tconst [saving, setSaving] = useState(false)\n\tconst [picking, setPicking] = useState(false)\n\n\tuseEffect(() => {\n\t\tif (!visible) return\n\t\tsetSeparateTabs(settings.customBackgroundSeparateTabs ?? true)\n\t\tsetPickedSlots({ search: null, library: null, my: null })\n\t\tsetPickedUnified(null)\n\t\tsetSaving(false)\n\t\tsetPicking(false)\n\t}, [visible, settings.customBackgroundSeparateTabs])\n\n\tconst handlePickSlot = async (slot: TabSlot) => {\n\t\tif (picking || saving) return\n\t\tsetPicking(true)\n\t\ttry {\n\t\t\tconst uri = await pickImageFromAlbum()\n\t\t\tif (uri) {\n\t\t\t\tsetPickedSlots((prev) => ({ ...prev, [slot]: uri }))\n\t\t\t}\n\t\t} catch {\n\t\t\ttoast.error('从相册读取图片失败，请重试')\n\t\t} finally {\n\t\t\tsetPicking(false)\n\t\t}\n\t}\n\n\tconst handlePickUnified = async () => {\n\t\tif (picking || saving) return\n\t\tsetPicking(true)\n\t\ttry {\n\t\t\tconst uri = await pickImageFromAlbum()\n\t\t\tif (uri) {\n\t\t\t\tsetPickedUnified(uri)\n\t\t\t}\n\t\t} catch {\n\t\t\ttoast.error('从相册读取图片失败，请重试')\n\t\t} finally {\n\t\t\tsetPicking(false)\n\t\t}\n\t}\n\n\tconst handleConfirm = async () => {\n\t\tif (saving) return\n\n\t\tif (separateTabs) {\n\t\t\tconst hasAnyPicked = Boolean(\n\t\t\t\tpickedSlots.search || pickedSlots.library || pickedSlots.my,\n\t\t\t)\n\t\t\tif (!hasAnyPicked) {\n\t\t\t\ttoast.error('请选择至少一张背景图片')\n\t\t\t\treturn\n\t\t\t}\n\n\t\t\tsetSaving(true)\n\t\t\ttry {\n\t\t\t\tconst nextSearch = pickedSlots.search\n\t\t\t\t\t? await saveCustomBackgroundFile(pickedSlots.search, 'search')\n\t\t\t\t\t: (settings.customBackgroundSearch ?? null)\n\t\t\t\tconst nextLibrary = pickedSlots.library\n\t\t\t\t\t? await saveCustomBackgroundFile(pickedSlots.library, 'library')\n\t\t\t\t\t: (settings.customBackgroundLibrary ?? null)\n\t\t\t\tconst nextMy = pickedSlots.my\n\t\t\t\t\t? await saveCustomBackgroundFile(pickedSlots.my, 'my')\n\t\t\t\t\t: (settings.customBackgroundMy ?? null)\n\n\t\t\t\tsetSettings({\n\t\t\t\t\tcustomBackgroundSeparateTabs: true,\n\t\t\t\t\tcustomBackgroundSearch: nextSearch,\n\t\t\t\t\tcustomBackgroundLibrary: nextLibrary,\n\t\t\t\t\tcustomBackgroundMy: nextMy,\n\t\t\t\t})\n\t\t\t\tcleanupUnusedCustomBackgroundFiles([nextSearch, nextLibrary, nextMy])\n\t\t\t\ttoast.success('自定义背景图片已生效')\n\t\t\t\tonDismiss()\n\t\t\t} catch {\n\t\t\t\ttoast.error('保存背景图片失败，请重试')\n\t\t\t} finally {\n\t\t\t\tsetSaving(false)\n\t\t\t}\n\t\t} else {\n\t\t\tif (!pickedUnified) {\n\t\t\t\ttoast.error('请选择至少一张背景图片')\n\t\t\t\treturn\n\t\t\t}\n\n\t\t\tsetSaving(true)\n\t\t\ttry {\n\t\t\t\tconst unifiedFileName = await saveCustomBackgroundFile(\n\t\t\t\t\tpickedUnified,\n\t\t\t\t\t'unified',\n\t\t\t\t)\n\t\t\t\tsetSettings({\n\t\t\t\t\tcustomBackgroundSeparateTabs: false,\n\t\t\t\t\tcustomBackgroundSearch: unifiedFileName,\n\t\t\t\t\tcustomBackgroundLibrary: unifiedFileName,\n\t\t\t\t\tcustomBackgroundMy: unifiedFileName,\n\t\t\t\t})\n\t\t\t\tcleanupUnusedCustomBackgroundFiles([unifiedFileName])\n\t\t\t\ttoast.success('自定义背景图片已应用到全部主页')\n\t\t\t\tonDismiss()\n\t\t\t} catch {\n\t\t\t\ttoast.error('保存背景图片失败，请重试')\n\t\t\t} finally {\n\t\t\t\tsetSaving(false)\n\t\t\t}\n\t\t}\n\t}\n\n\treturn (\n\t\t<Portal>\n\t\t\t<AnimatedModalOverlay\n\t\t\t\tvisible={visible}\n\t\t\t\tonDismiss={() => {\n\t\t\t\t\tif (!saving) onDismiss()\n\t\t\t\t}}\n\t\t\t>\n\t\t\t\t<Dialog.Title>选择背景图片</Dialog.Title>\n\t\t\t\t<Dialog.Content style={styles.content}>\n\t\t\t\t\t<View style={styles.switchRow}>\n\t\t\t\t\t\t<View style={styles.switchTextWrap}>\n\t\t\t\t\t\t\t<Text variant='titleSmall' style={styles.switchTitle}>\n\t\t\t\t\t\t\t\t独立主页背景\n\t\t\t\t\t\t\t</Text>\n\t\t\t\t\t\t\t<Text\n\t\t\t\t\t\t\t\tvariant='bodySmall'\n\t\t\t\t\t\t\t\tstyle={[styles.switchDesc, { color: colors.onSurfaceVariant }]}\n\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t分别为「搜索」、「音乐库」和「我的」设置不同的专属背景图；关闭后统一使用同一张背景图\n\t\t\t\t\t\t\t</Text>\n\t\t\t\t\t\t</View>\n\t\t\t\t\t\t<UniversalSwitch\n\t\t\t\t\t\t\tvalue={separateTabs}\n\t\t\t\t\t\t\tonValueChange={setSeparateTabs}\n\t\t\t\t\t\t\ttestID='custom-bg-separate-switch'\n\t\t\t\t\t\t/>\n\t\t\t\t\t</View>\n\n\t\t\t\t\t{separateTabs ? (\n\t\t\t\t\t\t<View style={styles.threeGrid}>\n\t\t\t\t\t\t\t{TAB_SLOTS.map(({ key, label }) => {\n\t\t\t\t\t\t\t\tconst uri = pickedSlots[key]\n\t\t\t\t\t\t\t\treturn (\n\t\t\t\t\t\t\t\t\t<View key={key} style={styles.slotColumn}>\n\t\t\t\t\t\t\t\t\t\t<Pressable\n\t\t\t\t\t\t\t\t\t\t\taccessibilityRole='button'\n\t\t\t\t\t\t\t\t\t\t\taccessibilityLabel={`选择${label}界面背景图片`}\n\t\t\t\t\t\t\t\t\t\t\tonPress={() => void handlePickSlot(key)}\n\t\t\t\t\t\t\t\t\t\t\tstyle={({ pressed }) => [\n\t\t\t\t\t\t\t\t\t\t\t\tstyles.pickerBox,\n\t\t\t\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\t\t\t\tbackgroundColor: colors.elevation.level2,\n\t\t\t\t\t\t\t\t\t\t\t\t\tborderColor: uri\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t? colors.primary\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t: colors.outlineVariant,\n\t\t\t\t\t\t\t\t\t\t\t\t\topacity: pressed ? 0.8 : 1,\n\t\t\t\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t\t\t\t]}\n\t\t\t\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t\t\t\t{uri ? (\n\t\t\t\t\t\t\t\t\t\t\t\t<>\n\t\t\t\t\t\t\t\t\t\t\t\t\t<Image\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tsource={{ uri }}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tstyle={StyleSheet.absoluteFill}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tcontentFit='cover'\n\t\t\t\t\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t\t\t\t\t\t<Pressable\n\t\t\t\t\t\t\t\t\t\t\t\t\t\thitSlop={8}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tstyle={styles.clearBadge}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tonPress={(e) => {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\te.stopPropagation()\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tsetPickedSlots((prev) => ({\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t...prev,\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t[key]: null,\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}))\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}}\n\t\t\t\t\t\t\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<Icon source='close' size={14} color='#FFFFFF' />\n\t\t\t\t\t\t\t\t\t\t\t\t\t</Pressable>\n\t\t\t\t\t\t\t\t\t\t\t\t</>\n\t\t\t\t\t\t\t\t\t\t\t) : (\n\t\t\t\t\t\t\t\t\t\t\t\t<Icon\n\t\t\t\t\t\t\t\t\t\t\t\t\tsource='plus'\n\t\t\t\t\t\t\t\t\t\t\t\t\tsize={28}\n\t\t\t\t\t\t\t\t\t\t\t\t\tcolor={colors.onSurfaceVariant}\n\t\t\t\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t\t\t\t)}\n\t\t\t\t\t\t\t\t\t\t</Pressable>\n\t\t\t\t\t\t\t\t\t\t<Text\n\t\t\t\t\t\t\t\t\t\t\tvariant='bodyMedium'\n\t\t\t\t\t\t\t\t\t\t\tstyle={[styles.slotLabel, { color: colors.onSurface }]}\n\t\t\t\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t\t\t\t{label}\n\t\t\t\t\t\t\t\t\t\t</Text>\n\t\t\t\t\t\t\t\t\t</View>\n\t\t\t\t\t\t\t\t)\n\t\t\t\t\t\t\t})}\n\t\t\t\t\t\t</View>\n\t\t\t\t\t) : (\n\t\t\t\t\t\t<View style={styles.singleContainer}>\n\t\t\t\t\t\t\t<Pressable\n\t\t\t\t\t\t\t\taccessibilityRole='button'\n\t\t\t\t\t\t\t\taccessibilityLabel='选择全局主页背景图片'\n\t\t\t\t\t\t\t\tonPress={() => void handlePickUnified()}\n\t\t\t\t\t\t\t\tstyle={({ pressed }) => [\n\t\t\t\t\t\t\t\t\tstyles.singlePickerBox,\n\t\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\t\tbackgroundColor: colors.elevation.level2,\n\t\t\t\t\t\t\t\t\t\tborderColor: pickedUnified\n\t\t\t\t\t\t\t\t\t\t\t? colors.primary\n\t\t\t\t\t\t\t\t\t\t\t: colors.outlineVariant,\n\t\t\t\t\t\t\t\t\t\topacity: pressed ? 0.8 : 1,\n\t\t\t\t\t\t\t\t\t},\n\t\t\t\t\t\t\t\t]}\n\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t{pickedUnified ? (\n\t\t\t\t\t\t\t\t\t<>\n\t\t\t\t\t\t\t\t\t\t<Image\n\t\t\t\t\t\t\t\t\t\t\tsource={{ uri: pickedUnified }}\n\t\t\t\t\t\t\t\t\t\t\tstyle={StyleSheet.absoluteFill}\n\t\t\t\t\t\t\t\t\t\t\tcontentFit='cover'\n\t\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t\t\t<Pressable\n\t\t\t\t\t\t\t\t\t\t\thitSlop={8}\n\t\t\t\t\t\t\t\t\t\t\tstyle={styles.clearBadge}\n\t\t\t\t\t\t\t\t\t\t\tonPress={(e) => {\n\t\t\t\t\t\t\t\t\t\t\t\te.stopPropagation()\n\t\t\t\t\t\t\t\t\t\t\t\tsetPickedUnified(null)\n\t\t\t\t\t\t\t\t\t\t\t}}\n\t\t\t\t\t\t\t\t\t\t>\n\t\t\t\t\t\t\t\t\t\t\t<Icon source='close' size={14} color='#FFFFFF' />\n\t\t\t\t\t\t\t\t\t\t</Pressable>\n\t\t\t\t\t\t\t\t\t</>\n\t\t\t\t\t\t\t\t) : (\n\t\t\t\t\t\t\t\t\t<Icon\n\t\t\t\t\t\t\t\t\t\tsource='plus'\n\t\t\t\t\t\t\t\t\t\tsize={32}\n\t\t\t\t\t\t\t\t\t\tcolor={colors.onSurfaceVariant}\n\t\t\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t\t\t)}\n\t\t\t\t\t\t\t</Pressable>\n\t\t\t\t\t\t</View>\n\t\t\t\t\t)}\n\t\t\t\t</Dialog.Content>\n\t\t\t\t<Dialog.Actions style={styles.actions}>\n\t\t\t\t\t<Button\n\t\t\t\t\t\tmode='outlined'\n\t\t\t\t\t\tdisabled={saving}\n\t\t\t\t\t\tonPress={onDismiss}\n\t\t\t\t\t>\n\t\t\t\t\t\t取消\n\t\t\t\t\t</Button>\n\t\t\t\t\t<Button\n\t\t\t\t\t\tmode='contained'\n\t\t\t\t\t\tloading={saving}\n\t\t\t\t\t\tdisabled={saving}\n\t\t\t\t\t\tonPress={() => void handleConfirm()}\n\t\t\t\t\t>\n\t\t\t\t\t\t确认\n\t\t\t\t\t</Button>\n\t\t\t\t</Dialog.Actions>\n\t\t\t</AnimatedModalOverlay>\n\t\t</Portal>\n\t)\n}\n\nconst styles = StyleSheet.create({\n\tcontent: {\n\t\tgap: 20,\n\t\tpaddingTop: 4,\n\t},\n\tswitchRow: {\n\t\tflexDirection: 'row',\n\t\talignItems: 'center',\n\t\tjustifyContent: 'space-between',\n\t\tgap: 12,\n\t},\n\tswitchTextWrap: {\n\t\tflex: 1,\n\t\tgap: 4,\n\t},\n\tswitchTitle: {\n\t\tfontWeight: '600',\n\t},\n\tswitchDesc: {\n\t\tlineHeight: 18,\n\t},\n\tthreeGrid: {\n\t\tflexDirection: 'row',\n\t\tjustifyContent: 'space-between',\n\t\tgap: 12,\n\t\tmarginTop: 4,\n\t},\n\tslotColumn: {\n\t\tflex: 1,\n\t\talignItems: 'center',\n\t\tgap: 8,\n\t},\n\tpickerBox: {\n\t\twidth: '100%',\n\t\taspectRatio: 0.62,\n\t\tborderRadius: 16,\n\t\tborderWidth: 1.5,\n\t\talignItems: 'center',\n\t\tjustifyContent: 'center',\n\t\toverflow: 'hidden',\n\t},\n\tslotLabel: {\n\t\tfontWeight: '500',\n\t\ttextAlign: 'center',\n\t},\n\tsingleContainer: {\n\t\talignItems: 'center',\n\t\tjustifyContent: 'center',\n\t\tpaddingVertical: 6,\n\t},\n\tsinglePickerBox: {\n\t\twidth: 112,\n\t\theight: 180,\n\t\tborderRadius: 16,\n\t\tborderWidth: 1.5,\n\t\talignItems: 'center',\n\t\tjustifyContent: 'center',\n\t\toverflow: 'hidden',\n\t},\n\tclearBadge: {\n\t\tposition: 'absolute',\n\t\ttop: 6,\n\t\tright: 6,\n\t\twidth: 22,\n\t\theight: 22,\n\t\tborderRadius: 11,\n\t\tbackgroundColor: 'rgba(0,0,0,0.55)',\n\t\talignItems: 'center',\n\t\tjustifyContent: 'center',\n\t},\n\tactions: {\n\t\tgap: 8,\n\t},\n})\n", "utf8");
+          fs.mkdirSync("apps/mobile/src/components/navigation", { recursive: true });
+          fs.writeFileSync("apps/mobile/src/components/navigation/SkinAppbarBackground.tsx", "import MaskedView from '@react-native-masked-view/masked-view'\nimport { Image } from 'expo-image'\nimport { LinearGradient } from 'expo-linear-gradient'\nimport { memo } from 'react'\nimport { StyleSheet, View } from 'react-native'\n\nimport useAppStore from '@/hooks/stores/useAppStore'\nimport useSkinStore from '@/hooks/stores/useSkinStore'\nimport useActiveSkin from '@/hooks/theme/useActiveSkin'\n\nexport const SKIN_APPBAR_FADE_HEIGHT = 56\n\ninterface SkinAppbarBackgroundProps {\n\theight: number\n}\n\nconst SkinAppbarBackground = memo(function SkinAppbarBackground({\n\theight,\n}: SkinAppbarBackgroundProps) {\n\tconst activeSkin = useActiveSkin()\n\tconst activeSkinIndex = useSkinStore((state) => state.activeSkinIndex)\n\tconst pureWhiteBackground = useAppStore(\n\t\t(state) => state.settings.pureWhiteBackground,\n\t)\n\n\tconst head = activeSkin?.skins[activeSkinIndex]?.background.head\n\tif (!head || pureWhiteBackground) return null\n\n\treturn (\n\t\t<View\n\t\t\tpointerEvents='none'\n\t\t\tstyle={[styles.container, { height }]}\n\t\t>\n\t\t\t<MaskedView\n\t\t\t\tstyle={StyleSheet.absoluteFill}\n\t\t\t\tmaskElement={\n\t\t\t\t\t<View style={styles.maskContainer}>\n\t\t\t\t\t\t<View style={styles.maskSolid} />\n\t\t\t\t\t\t<LinearGradient\n\t\t\t\t\t\t\tcolors={['#000000', 'transparent']}\n\t\t\t\t\t\t\tstart={{ x: 0, y: 0 }}\n\t\t\t\t\t\t\tend={{ x: 0, y: 1 }}\n\t\t\t\t\t\t\tstyle={styles.fade}\n\t\t\t\t\t\t/>\n\t\t\t\t\t</View>\n\t\t\t\t}\n\t\t\t>\n\t\t\t\t<Image\n\t\t\t\t\tsource={head}\n\t\t\t\t\tstyle={styles.image}\n\t\t\t\t\tcontentFit='cover'\n\t\t\t\t\tcachePolicy='memory-disk'\n\t\t\t\t/>\n\t\t\t</MaskedView>\n\t\t</View>\n\t)\n})\n\nconst styles = StyleSheet.create({\n\tcontainer: {\n\t\tposition: 'absolute',\n\t\ttop: 0,\n\t\tleft: 0,\n\t\tright: 0,\n\t\toverflow: 'hidden',\n\t},\n\tmaskContainer: {\n\t\tflex: 1,\n\t},\n\tmaskSolid: {\n\t\tflex: 1,\n\t\tbackgroundColor: '#000000',\n\t},\n\timage: {\n\t\t...StyleSheet.absoluteFill,\n\t},\n\tfade: {\n\t\theight: SKIN_APPBAR_FADE_HEIGHT,\n\t},\n})\n\nexport default SkinAppbarBackground\n", "utf8");
+          fs.writeFileSync("apps/mobile/src/components/navigation/TabCustomBackground.tsx", "import { Image } from 'expo-image'\nimport { memo, useMemo } from 'react'\nimport { StyleSheet, View } from 'react-native'\nimport { useTheme } from 'react-native-paper'\n\nimport useAppStore from '@/hooks/stores/useAppStore'\nimport useSkinStore from '@/hooks/stores/useSkinStore'\nimport useActiveSkin from '@/hooks/theme/useActiveSkin'\nimport { resolveCustomBackgroundUri } from '@/lib/theme/customBackground'\n\nimport { SKIN_APPBAR_FADE_HEIGHT } from './SkinAppbarBackground'\n\nexport type HomeTabKey = 'search' | 'library' | 'my'\n\ninterface TabCustomBackgroundProps {\n\ttab: HomeTabKey\n\theadHeight: number\n}\n\nconst TabCustomBackground = memo(function TabCustomBackground({\n\ttab,\n\theadHeight,\n}: TabCustomBackgroundProps) {\n\tconst theme = useTheme()\n\tconst pureWhiteBackground = useAppStore(\n\t\t(state) => state.settings.pureWhiteBackground,\n\t)\n\tconst savedValue = useAppStore((state) => {\n\t\tif (tab === 'search') return state.settings.customBackgroundSearch\n\t\tif (tab === 'library') return state.settings.customBackgroundLibrary\n\t\treturn state.settings.customBackgroundMy\n\t})\n\n\tconst activeSkin = useActiveSkin()\n\tconst activeSkinIndex = useSkinStore((state) => state.activeSkinIndex)\n\tconst hasHeadSkin = Boolean(\n\t\tactiveSkin?.skins[activeSkinIndex]?.background.head,\n\t)\n\n\tconst resolvedUri = useMemo(\n\t\t() => resolveCustomBackgroundUri(savedValue),\n\t\t[savedValue],\n\t)\n\n\tif (pureWhiteBackground || !resolvedUri) {\n\t\treturn null\n\t}\n\n\tconst topOffset = hasHeadSkin\n\t\t? Math.max(0, headHeight - SKIN_APPBAR_FADE_HEIGHT)\n\t\t: 0\n\n\tconst scrimColor = theme.dark\n\t\t? 'rgba(0, 0, 0, 0.38)'\n\t\t: 'rgba(255, 255, 255, 0.45)'\n\n\treturn (\n\t\t<View\n\t\t\tpointerEvents='none'\n\t\t\tstyle={[styles.container, { top: topOffset }]}\n\t\t>\n\t\t\t<Image\n\t\t\t\tsource={{ uri: resolvedUri }}\n\t\t\t\tstyle={StyleSheet.absoluteFill}\n\t\t\t\tcontentFit='cover'\n\t\t\t\tcachePolicy='memory-disk'\n\t\t\t/>\n\t\t\t<View\n\t\t\t\tstyle={[StyleSheet.absoluteFill, { backgroundColor: scrimColor }]}\n\t\t\t/>\n\t\t</View>\n\t)\n})\n\nconst styles = StyleSheet.create({\n\tcontainer: {\n\t\tposition: 'absolute',\n\t\tleft: 0,\n\t\tright: 0,\n\t\tbottom: 0,\n\t\toverflow: 'hidden',\n\t},\n})\n\nexport default TabCustomBackground\n", "utf8");
+          const mainThemeSecPath = "apps/mobile/src/features/theme/ThemeSection.tsx";
+          if (fs.existsSync(mainThemeSecPath)) {
+            let tsCode = fs.readFileSync(mainThemeSecPath, "utf8");
+            if (!tsCode.includes("CustomBackgroundModal")) {
+              tsCode = tsCode.replace(
+                "import useSkinStore from '@/hooks/stores/useSkinStore'",
+                "import useAppStore from '@/hooks/stores/useAppStore'\nimport useSkinStore from '@/hooks/stores/useSkinStore'\nimport { cleanupUnusedCustomBackgroundFiles } from '@/lib/theme/customBackground'\nimport CustomBackgroundModal from './CustomBackgroundModal'"
+              );
+              tsCode = tsCode.replace(
+                /const \[previewAsset, setPreviewAsset\] = useState<SkinBootSplashAsset \| null>\(\s*null,\s*\)/,
+                "const [previewAsset, setPreviewAsset] = useState<SkinBootSplashAsset | null>(\n\t\tnull,\n\t)\n\tconst [customBgModalVisible, setCustomBgModalVisible] = useState(false)\n\tconst customBgSearch = useAppStore((s) => s.settings.customBackgroundSearch)\n\tconst customBgLibrary = useAppStore((s) => s.settings.customBackgroundLibrary)\n\tconst customBgMy = useAppStore((s) => s.settings.customBackgroundMy)\n\tconst setAppSettings = useAppStore((s) => s.setSettings)\n\tconst hasCustomBackground = Boolean(customBgSearch || customBgLibrary || customBgMy)\n\tconst handleResetCustomBackground = () => {\n\t\talert(\n\t\t\t'恢复默认背景',\n\t\t\t'确定要清除当前已设置的自定义主页背景图片吗？',\n\t\t\t[\n\t\t\t\t{ text: '取消' },\n\t\t\t\t{\n\t\t\t\t\ttext: '确定',\n\t\t\t\t\tonPress: () => {\n\t\t\t\t\t\tsetAppSettings({\n\t\t\t\t\t\t\tcustomBackgroundSearch: null,\n\t\t\t\t\t\t\tcustomBackgroundLibrary: null,\n\t\t\t\t\t\t\tcustomBackgroundMy: null,\n\t\t\t\t\t\t})\n\t\t\t\t\t\tcleanupUnusedCustomBackgroundFiles([])\n\t\t\t\t\t\ttoast.success('已恢复默认背景')\n\t\t\t\t\t},\n\t\t\t\t},\n\t\t\t],\n\t\t\t{ cancelable: true },\n\t\t)\n\t}"
+              );
+              tsCode = tsCode.replace(
+                /(<Button[\s\S]*?>\s*添加主题\s*<\/Button>)/,
+                "$1\n\t\t\t\t<View style={{ height: 12 }} />\n\t\t\t\t<Button\n\t\t\t\t\tmode='outlined'\n\t\t\t\t\tdisabled={disabled}\n\t\t\t\t\tonPress={() => setCustomBgModalVisible(true)}\n\t\t\t\t>\n\t\t\t\t\t自定义背景图片\n\t\t\t\t</Button>\n\t\t\t\t{!disabled && hasCustomBackground ? (\n\t\t\t\t\t<View style={{ marginTop: 8 }}>\n\t\t\t\t\t\t<Button\n\t\t\t\t\t\t\tmode='text'\n\t\t\t\t\t\t\ttextColor={colors.error}\n\t\t\t\t\t\t\tonPress={handleResetCustomBackground}\n\t\t\t\t\t\t>\n\t\t\t\t\t\t\t恢复默认背景\n\t\t\t\t\t\t</Button>\n\t\t\t\t\t</View>\n\t\t\t\t) : null}"
+              );
+              tsCode = tsCode.replace(
+                "<Portal>",
+                "<CustomBackgroundModal\n\t\t\t\tvisible={!disabled && customBgModalVisible}\n\t\t\t\tonDismiss={() => setCustomBgModalVisible(false)}\n\t\t\t/>\n\t\t\t<Portal>"
+              );
+              fs.writeFileSync(mainThemeSecPath, tsCode, "utf8");
+              console.log("✅ 已在 ThemeSection.tsx 中注入「自定义背景图片」按钮与弹窗");
+            }
+          }
+          const tabTargets = [
+            { file: "apps/mobile/src/app/(tabs)/index.tsx", tab: "search" },
+            { file: "apps/mobile/src/app/(tabs)/library/[tab].tsx", tab: "library" },
+            { file: "apps/mobile/src/app/(tabs)/my.tsx", tab: "my" }
+          ];
+          for (const item of tabTargets) {
+            if (fs.existsSync(item.file)) {
+              let tabCode = fs.readFileSync(item.file, "utf8");
+              if (!tabCode.includes("TabCustomBackground")) {
+                tabCode = tabCode.replace(
+                  "import SkinAppbarBackground from '@/components/navigation/SkinAppbarBackground'",
+                  "import SkinAppbarBackground from '@/components/navigation/SkinAppbarBackground'\nimport TabCustomBackground from '@/components/navigation/TabCustomBackground'"
+                );
+                tabCode = tabCode.replace(
+                  /<SkinAppbarBackground\s+height=\{insets\.top\s*\+\s*(\d+)\}\s*\/>/,
+                  `<TabCustomBackground tab='${item.tab}' headHeight={insets.top + $1} />\n\t\t\t<SkinAppbarBackground height={insets.top + $1} />`
+                );
+                fs.writeFileSync(item.file, tabCode, "utf8");
+              }
+            }
+          }
+          for (const sharedPath of ["apps/mobile/src/features/library/shared/TabDisabled.tsx", "apps/mobile/src/features/library/shared/DataFetchingError.tsx"]) {
+            if (fs.existsSync(sharedPath)) {
+              let shCode = fs.readFileSync(sharedPath, "utf8");
+              shCode = shCode.replace("style={[styles.container, { backgroundColor: colors.background }]}", "style={styles.container}");
+              fs.writeFileSync(sharedPath, shCode, "utf8");
+            }
+          }
+          console.log("✅ 已为搜索/音乐库/我的挂载 TabCustomBackground 并实现与装扮无缝渐变融合");
+
           // 补丁 about.tsx：在“项目主页”下方新增“iOS改版项目主页”
           const aboutPagePath = "apps/mobile/src/app/settings/about.tsx";
           if (fs.existsSync(aboutPagePath)) {
@@ -5208,7 +5757,7 @@ jobs:
                 const divIndex = aboutCode.indexOf("<Divider />", anchorIndex);
                 if (divIndex !== -1) {
                   const insertPos = divIndex + "<Divider />".length;
-                  const injection = "\n\t\t\t\t\t<List.Item\n\t\t\t\t\t\ttitle='iOS改版项目主页'\n\t\t\t\t\t\tdescription='https://github.com/dusttrustrs/BBPlayer-iOS-Package'\n\t\t\t\t\t\tleft={(props) => (\n\t\t\t\t\t\t\t<List.Icon\n\t\t\t\t\t\t\t\t{...props}\n\t\t\t\t\t\t\t\ticon='github'\n\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t)}\n\t\t\t\t\t\tright={(props) => (\n\t\t\t\t\t\t\t<List.Icon\n\t\t\t\t\t\t\t\t{...props}\n\t\t\t\t\t\t\t\ticon='open-in-new'\n\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t)}\n\t\t\t\t\t\tonPress={() =>\n\t\t\t\t\t\t\tvoid openExternalLink(\n\t\t\t\t\t\t\t\t'https://github.com/dusttrustrs/BBPlayer-iOS-Package',\n\t\t\t\t\t\t\t)\n\t\t\t\t\t\t}\n\t\t\t\t\t/>\n\t\t\t\t\t<Divider />";
+                  const injection = "\n\t\t\t\t\t<List.Item\n\t\t\t\t\t\ttitle='iOS改版项目主页'\n\t\t\t\t\t\tdescription='https://github.com/dusttrustrs/BBPlayer-iOS'\n\t\t\t\t\t\tleft={(props) => (\n\t\t\t\t\t\t\t<List.Icon\n\t\t\t\t\t\t\t\t{...props}\n\t\t\t\t\t\t\t\ticon='github'\n\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t)}\n\t\t\t\t\t\tright={(props) => (\n\t\t\t\t\t\t\t<List.Icon\n\t\t\t\t\t\t\t\t{...props}\n\t\t\t\t\t\t\t\ticon='open-in-new'\n\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t)}\n\t\t\t\t\t\tonPress={() =>\n\t\t\t\t\t\t\tvoid openExternalLink(\n\t\t\t\t\t\t\t\t'https://github.com/dusttrustrs/BBPlayer-iOS',\n\t\t\t\t\t\t\t)\n\t\t\t\t\t\t}\n\t\t\t\t\t/>\n\t\t\t\t\t<Divider />";
                   aboutCode = aboutCode.slice(0, insertPos) + injection + aboutCode.slice(insertPos);
                   fs.writeFileSync(aboutPagePath, aboutCode, "utf8");
                   console.log("✅ 已在 about.tsx 中添加 iOS改版项目主页 入口");
@@ -5222,7 +5771,7 @@ jobs:
           if (fs.existsSync(starModalPath)) {
             let starCode = fs.readFileSync(starModalPath, "utf8");
             if (starCode.includes("https://github.com/bbplayer-app/BBPlayer")) {
-              starCode = starCode.replace("https://github.com/bbplayer-app/BBPlayer", "https://github.com/dusttrustrs/BBPlayer-iOS-Package");
+              starCode = starCode.replace("https://github.com/bbplayer-app/BBPlayer", "https://github.com/dusttrustrs/BBPlayer-iOS");
               fs.writeFileSync(starModalPath, starCode, "utf8");
               console.log("✅ 已将 StarPromptModal 中的 GitHub 仓库地址更新为改版仓库");
             }
