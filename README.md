@@ -38,12 +38,6 @@
 > - ❌ **已知不支持 iOS 16 系统设备安装**。
 > - ❓ 其他 iOS、iPadOS 版本能否正常安装和运行，**请各位用户自行下载测试**！欢迎在 Issues 中反馈你的设备型号与系统版本兼容情况。
 
-### 🛠️ iOS 专享修复特性
-- ✅ **修复 Firebase 校验崩溃**：修正 iOS 原生 `GoogleService-Info.plist` 参数格式规范，彻底解决应用启动 `0.1s` 秒退（`SIGABRT`）问题。
-- ✅ **离线稳定性优化**：关闭未配置服务端时的 `expo-updates` 强行崩溃机制（`ErrorRecovery.crash()`），保障离线启动正常。
-- ✅ **启动错误边界修复**：排查并修复启动时 `Cannot read property 'ErrorBoundary' of undefined` 异常。
-- ✅ **GitHub Actions 云端打包**：集成完整的 CI/CD 流水线，自动化构建导出未签名 `.ipa` 安装包。
-
 ### 📲 下载与安装指南
 
 请前往项目的 **[Releases 页面](https://github.com/dusttrustrs/BBPlayer-iOS-/releases)** 获取最新构建的 `BBPlayer.ipa`：
