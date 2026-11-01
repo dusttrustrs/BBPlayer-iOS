@@ -2294,7 +2294,7 @@ jobs:
             "",
             "  var body: some View {",
             "    HStack(alignment: .center, spacing: spacing) {",
-            "      ForEach(0..<4, id: \\(\\.self\\)) { idx in",
+            "      ForEach(0..<4, id: \\.self) { idx in",
             "        Capsule()",
             "          .fill(color)",
             "          .frame(",
