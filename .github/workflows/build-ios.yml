@@ -2250,13 +2250,8 @@ jobs:
           for (const projectPath of projectFiles) {
             let project = fs.readFileSync(projectPath, "utf8");
             let updated = project.replace(/MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${releaseVersion};`);
-            // 主工程与常规 Target 锁定为 iOS 16.0 最低部署基线，确保 iOS 16.0 ~ 16.3 (如 iPadOS 16.2) 运行不被 dyld 拦截
-            updated = updated.replace(/([A-Z0-9]{24}\s*\/\* [^*]+ \*\/ = \{[\s\S]*?\};)/g, (block) => {
-              if (block.includes("ExpoWidgetsTarget")) {
-                return block.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.1;");
-              }
-              return block.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.0;");
-            });
+            // 统一锁定所有 Target 部署基线为 16.4，与 ExpoUI 模块编译基线严格对齐（避免 swiftmodule 版本不匹配）
+            updated = updated.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, `IPHONEOS_DEPLOYMENT_TARGET = 16.4;`);
             if (updated !== project) {
               fs.writeFileSync(projectPath, updated, "utf8");
               projectCount++;
@@ -2592,7 +2587,7 @@ jobs:
             const fs = require("fs");
             let podfile = fs.readFileSync("Podfile", "utf8");
             podfile = podfile.replace(/platform\s*:ios,\s*[\x27\x22][^\x27\x22]+[\x27\x22]/, "platform :ios, \x2716.4\x27");
-            const hook = "\n    # 锁定所有 Pod 编译版本为 iOS 16.0，杜绝高版本 SDK 强符号绑定导致低版本 dyld 崩溃\n    installer.pods_project.targets.each do |target|\n      target.build_configurations.each do |config|\n        config.build_settings[\x27IPHONEOS_DEPLOYMENT_TARGET\x27] = \x2716.0\x27\n      end\n    end\n";
+            const hook = "\n    # 锁定所有 Pod 编译版本为 iOS 16.4，与 ExpoUI 等组件部署基线完全对齐\n    installer.pods_project.targets.each do |target|\n      target.build_configurations.each do |config|\n        config.build_settings[\x27IPHONEOS_DEPLOYMENT_TARGET\x27] = \x2716.4\x27\n      end\n    end\n";
             if (podfile.includes("post_install do |installer|") && !podfile.includes("IPHONEOS_DEPLOYMENT_TARGET")) {
               podfile = podfile.replace("post_install do |installer|", "post_install do |installer|" + hook);
             }
@@ -2603,45 +2598,45 @@ jobs:
           node -e '
             const fs = require("fs");
             const path = require("path");
-            function patchCore(baseDir) {
-              const roots = [
-                path.resolve(baseDir, "../../../node_modules/.pnpm"),
-                path.resolve(baseDir, "../node_modules/.pnpm"),
-                path.resolve(baseDir, "../../../node_modules/expo-modules-core"),
-                path.resolve(baseDir, "../node_modules/expo-modules-core"),
-                path.resolve(baseDir, "Pods")
-              ];
-              for (const root of roots) {
-                if (!fs.existsSync(root)) continue;
-                try {
-                  const stat = fs.statSync(root);
-                  if (stat.isDirectory()) {
-                    for (const entry of fs.readdirSync(root)) {
-                      if (entry.startsWith("expo-modules-core") || entry === "ExpoModulesCore") {
-                        const filePaths = [
-                          path.join(root, entry, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
-                          path.join(root, entry, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
-                        ];
-                        for (const fp of filePaths) {
-                          if (fs.existsSync(fp)) {
-                            let c = fs.readFileSync(fp, "utf8");
-                            if (c.includes("safeAreaRegions")) {
-                              c = c.replace(
-                                /func setSafeAreaRegions[\s\S]*?if safeAreaRegions != regions \{\s*safeAreaRegions = regions\s*\}\s*\}/,
-                                "func setSafeAreaRegions(ignoring mode: ExpoSwiftUI.IgnoreSafeArea?) {\n    // 兼容 iOS 16.0 ~ 16.3：完全避免直接调用 safeAreaRegions，杜绝向 SwiftUI.framework 强绑定 iOS 16.4 专属符号导致 dyld 启动闪退\n  }"
-                              );
-                              fs.writeFileSync(fp, c, "utf8");
-                              console.log("✅ 已成功消除 SwiftUIHostingView.swift 的 safeAreaRegions 强符号绑定:", fp);
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                } catch(e) {}
-              }
+            const { execSync } = require("child_process");
+            function patchFile(fp) {
+              try {
+                if (!fs.existsSync(fp)) return;
+                let c = fs.readFileSync(fp, "utf8");
+                if (c.includes("safeAreaRegions")) {
+                  c = c.replace(
+                    /func setSafeAreaRegions[\s\S]*?if safeAreaRegions != regions \{\s*safeAreaRegions = regions\s*\}\s*\}/,
+                    "func setSafeAreaRegions(ignoring mode: ExpoSwiftUI.IgnoreSafeArea?) {\n    // 兼容 iOS 16.0 ~ 16.3：完全避免直接调用 safeAreaRegions，杜绝向 SwiftUI.framework 强绑定 iOS 16.4 专属符号导致 dyld 启动闪退\n  }"
+                  );
+                  fs.writeFileSync(fp, c, "utf8");
+                  console.log("✅ 已成功消除 safeAreaRegions 强符号绑定:", fp);
+                }
+              } catch(e) {}
             }
-            patchCore(process.cwd());
+            try {
+              const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
+              const found = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
+              found.forEach(patchFile);
+            } catch(e) {}
+            [
+              path.resolve("../../../node_modules/.pnpm"),
+              path.resolve("../node_modules/.pnpm"),
+              path.resolve("../../../node_modules/expo-modules-core"),
+              path.resolve("../node_modules/expo-modules-core"),
+              path.resolve("Pods")
+            ].forEach(full => {
+              if (!fs.existsSync(full)) return;
+              try {
+                for (const item of fs.readdirSync(full)) {
+                  if (item.startsWith("expo-modules-core") || item === "ExpoModulesCore") {
+                    [
+                      path.join(full, item, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
+                      path.join(full, item, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
+                    ].forEach(patchFile);
+                  }
+                }
+              } catch(e) {}
+            });
           '
           pod install --repo-update 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
           # 防御性检查：若未来 RNRepo 预编译产物的 Swift 主次版本高于当前 Runner 的 Swift 编译器，自动回退为源码编译
