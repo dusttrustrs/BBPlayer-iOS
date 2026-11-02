@@ -2594,12 +2594,21 @@ jobs:
             fs.writeFileSync("Podfile", podfile, "utf8");
             console.log("✅ 已配置 Podfile platform :ios, 16.4 与 post_install 目标锁定");
           '
-          # 关键修补：消除 ExpoModulesCore 中对 SwiftUI 16.4 专属 API (safeAreaRegions) 的强符号引用，杜绝 iPadOS 16.2 / iOS 16.0~16.3 dyld 启动崩溃
+          # 关键修补：强制 ExpoModulesCore 源码编译并消除 SwiftUI 16.4 专属 API (safeAreaRegions)，彻底杜绝 iPadOS 16.2 dyld 启动崩溃
           node -e '
             const fs = require("fs");
             const path = require("path");
             const { execSync } = require("child_process");
-            function patchFile(fp) {
+
+            const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
+
+            // 1. 删除所有 Expo 预编译产物目录 (prebuilds/output)，迫使 CocoaPods 完全使用本地源码编译
+            try {
+              execSync("find \"" + ws + "\" -type d -path \"*/expo-modules-core/prebuilds\" -exec rm -rf {} + 2>/dev/null || true");
+            } catch(e) {}
+
+            // 2. 修补 SwiftUIHostingView.swift，消除 safeAreaRegions 强符号调用
+            function patchSwiftUI(fp) {
               try {
                 if (!fs.existsSync(fp)) return;
                 let c = fs.readFileSync(fp, "utf8");
@@ -2613,11 +2622,66 @@ jobs:
                 }
               } catch(e) {}
             }
+
+            // 3. 修补 ExpoModulesCore.podspec，强制采用源码构建模式 (s.static_framework = true)
+            function patchPodspec(fp) {
+              try {
+                if (!fs.existsSync(fp)) return;
+                let c = fs.readFileSync(fp, "utf8");
+                if (c.includes("try_link_with_prebuilt_xcframework(s)")) {
+                  c = c.replace(
+                    /if \(!Expo::PackagesConfig\.instance\.try_link_with_prebuilt_xcframework\(s\)\)/g,
+                    "if (true) # force source build for iOS 16 compatibility"
+                  );
+                  fs.writeFileSync(fp, c, "utf8");
+                  console.log("✅ 已强制 ExpoModulesCore 源码编译 (podspec):", fp);
+                }
+              } catch(e) {}
+            }
+
+            // 4. 修补 autolinking 中的 precompiled_modules.rb，禁用针对 ExpoModulesCore / ExpoModulesWorklets 的预编译劫持
+            function patchPrecompiledRb(fp) {
+              try {
+                if (!fs.existsSync(fp)) return;
+                let c = fs.readFileSync(fp, "utf8");
+                let mod = false;
+                if (c.includes("def try_link_with_prebuilt_xcframework(spec)") && !c.includes("spec.name == \x27ExpoModulesCore\x27")) {
+                  c = c.replace(
+                    "def try_link_with_prebuilt_xcframework(spec)",
+                    "def try_link_with_prebuilt_xcframework(spec)\n        return false if spec.name == \x27ExpoModulesCore\x27 || spec.name == \x27ExpoModulesWorklets\x27"
+                  );
+                  mod = true;
+                }
+                if (c.includes("def should_auto_patch_spec?(pod_name, spec)") && !c.includes("pod_name == \x27ExpoModulesCore\x27")) {
+                  c = c.replace(
+                    "def should_auto_patch_spec?(pod_name, spec)",
+                    "def should_auto_patch_spec?(pod_name, spec)\n        return false if pod_name == \x27ExpoModulesCore\x27 || pod_name == \x27ExpoModulesWorklets\x27"
+                  );
+                  mod = true;
+                }
+                if (mod) {
+                  fs.writeFileSync(fp, c, "utf8");
+                  console.log("✅ 已在 autolinking 中禁用 ExpoModulesCore 预编译拦截:", fp);
+                }
+              } catch(e) {}
+            }
+
             try {
-              const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
-              const found = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
-              found.forEach(patchFile);
+              const swiftFiles = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
+              swiftFiles.forEach(patchSwiftUI);
             } catch(e) {}
+
+            try {
+              const podspecFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.podspec\" 2>/dev/null").toString().split("\n").filter(Boolean);
+              podspecFiles.forEach(patchPodspec);
+            } catch(e) {}
+
+            try {
+              const rbFiles = execSync("find \"" + ws + "\" -name \"precompiled_modules.rb\" 2>/dev/null").toString().split("\n").filter(Boolean);
+              rbFiles.forEach(patchPrecompiledRb);
+            } catch(e) {}
+
+            // 补充遍历 node_modules 目录（针对 pnpm 软链接结构）
             [
               path.resolve("../../../node_modules/.pnpm"),
               path.resolve("../node_modules/.pnpm"),
@@ -2632,12 +2696,17 @@ jobs:
                     [
                       path.join(full, item, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
                       path.join(full, item, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
-                    ].forEach(patchFile);
+                    ].forEach(patchSwiftUI);
+                    [
+                      path.join(full, item, "node_modules/expo-modules-core/ExpoModulesCore.podspec"),
+                      path.join(full, item, "ExpoModulesCore.podspec")
+                    ].forEach(patchPodspec);
                   }
                 }
               } catch(e) {}
             });
           '
+          rm -rf Pods/ExpoModulesCore ~/Library/Caches/CocoaPods
           pod install --repo-update 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
           # 防御性检查：若未来 RNRepo 预编译产物的 Swift 主次版本高于当前 Runner 的 Swift 编译器，自动回退为源码编译
           if ! ruby -e '
@@ -2654,6 +2723,16 @@ jobs:
             echo "⚠️ 检测到 RNRepo 预编译包 Swift 版本高于当前 Xcode，自动切换为 DISABLE_RNREPO=1 源码安装..."
             DISABLE_RNREPO=1 pod install 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
           fi
+          # 防御性断言：确保 Pods 中绝对未打包带有 16.4 safeAreaRegions 强符号的预编译 ExpoModulesCore.xcframework
+          node -e '
+            const fs = require("fs");
+            const badXcframework = "Pods/ExpoModulesCore/ExpoModulesCore.xcframework";
+            if (fs.existsSync(badXcframework)) {
+              console.error("❌ 致命错误：检测到 Pods 依然引用了预编译 ExpoModulesCore.xcframework！这会导致 iPadOS 16.2 启动闪退！");
+              process.exit(1);
+            }
+            console.log("✅ 验证通过：ExpoModulesCore 正在作为静态源码库进行编译，无预编译二进制冲突！");
+          '
           # 关键修复 4：修复 React-Core-prebuilt + useFrameworks: 'static' 在 Release 构建下的头文件与模块映射问题：
           # 1) 提前将 React-Core-prebuilt 切换至 Release 切片，防止 xcodebuild 阶段 replace-rncore-version.js 重新解压覆盖补丁。
           # 2) 将 React.xcframework 内部按子模块嵌套的头文件（如 Headers/React_Core/React/*.h、Headers/Yoga/yoga/*.h 等）
