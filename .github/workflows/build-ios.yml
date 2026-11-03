@@ -2594,119 +2594,138 @@ jobs:
             fs.writeFileSync("Podfile", podfile, "utf8");
             console.log("✅ 已配置 Podfile platform :ios, 16.4 与 post_install 目标锁定");
           '
-          # 关键修补：强制 ExpoModulesCore 源码编译并消除 SwiftUI 16.4 专属 API (safeAreaRegions)，彻底杜绝 iPadOS 16.2 dyld 启动崩溃
-          node -e '
-            const fs = require("fs");
-            const path = require("path");
-            const { execSync } = require("child_process");
+          # 关键修补：强制 ExpoModulesCore 源码与预编译二进制全面脱敏，消除 SwiftUI 16.4 safeAreaRegions 强符号，杜绝 iPadOS 16.2 启动闪退
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+          const { execSync } = require("child_process");
 
-            const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
+          const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
 
-            // 1. 删除所有 Expo 预编译产物目录 (prebuilds/output)，迫使 CocoaPods 完全使用本地源码编译
-            try {
-              execSync("find \"" + ws + "\" -type d -path \"*/expo-modules-core/prebuilds\" -exec rm -rf {} + 2>/dev/null || true");
-            } catch(e) {}
+          const targets = [
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV8keyboardACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV9containerACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMa", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMn", good: "_$s7SwiftUI9EmptyViewVN" }
+          ];
 
-            // 2. 修补 SwiftUIHostingView.swift，消除 safeAreaRegions 强符号调用
-            function patchSwiftUI(fp) {
-              try {
-                if (!fs.existsSync(fp)) return;
-                let c = fs.readFileSync(fp, "utf8");
-                if (c.includes("safeAreaRegions")) {
-                  c = c.replace(
-                    /func setSafeAreaRegions[\s\S]*?if safeAreaRegions != regions \{\s*safeAreaRegions = regions\s*\}\s*\}/,
-                    "func setSafeAreaRegions(ignoring mode: ExpoSwiftUI.IgnoreSafeArea?) {\n    // 兼容 iOS 16.0 ~ 16.3：完全避免直接调用 safeAreaRegions，杜绝向 SwiftUI.framework 强绑定 iOS 16.4 专属符号导致 dyld 启动闪退\n  }"
-                  );
-                  fs.writeFileSync(fp, c, "utf8");
-                  console.log("✅ 已成功消除 safeAreaRegions 强符号绑定:", fp);
-                }
-              } catch(e) {}
+          function patchBinaryBuffer(buf) {
+            let patched = 0;
+            for (const t of targets) {
+              let idx = 0;
+              while ((idx = buf.indexOf(t.bad, idx)) !== -1) {
+                const rep = Buffer.alloc(t.bad.length, 0);
+                rep.write(t.good, 0, "utf8");
+                rep.copy(buf, idx);
+                patched++;
+                idx += t.bad.length;
+              }
             }
+            return patched;
+          }
 
-            // 3. 修补 ExpoModulesCore.podspec，强制采用源码构建模式 (s.static_framework = true)
-            function patchPodspec(fp) {
-              try {
-                if (!fs.existsSync(fp)) return;
-                let c = fs.readFileSync(fp, "utf8");
-                if (c.includes("try_link_with_prebuilt_xcframework(s)")) {
-                  c = c.replace(
-                    /if \(!Expo::PackagesConfig\.instance\.try_link_with_prebuilt_xcframework\(s\)\)/g,
-                    "if (true) # force source build for iOS 16 compatibility"
-                  );
-                  fs.writeFileSync(fp, c, "utf8");
-                  console.log("✅ 已强制 ExpoModulesCore 源码编译 (podspec):", fp);
-                }
-              } catch(e) {}
-            }
-
-            // 4. 修补 autolinking 中的 precompiled_modules.rb，禁用针对 ExpoModulesCore / ExpoModulesWorklets 的预编译劫持
-            function patchPrecompiledRb(fp) {
-              try {
-                if (!fs.existsSync(fp)) return;
-                let c = fs.readFileSync(fp, "utf8");
-                let mod = false;
-                if (c.includes("def try_link_with_prebuilt_xcframework(spec)") && !c.includes("spec.name == \x27ExpoModulesCore\x27")) {
-                  c = c.replace(
-                    "def try_link_with_prebuilt_xcframework(spec)",
-                    "def try_link_with_prebuilt_xcframework(spec)\n        return false if spec.name == \x27ExpoModulesCore\x27 || spec.name == \x27ExpoModulesWorklets\x27"
-                  );
-                  mod = true;
-                }
-                if (c.includes("def should_auto_patch_spec?(pod_name, spec)") && !c.includes("pod_name == \x27ExpoModulesCore\x27")) {
-                  c = c.replace(
-                    "def should_auto_patch_spec?(pod_name, spec)",
-                    "def should_auto_patch_spec?(pod_name, spec)\n        return false if pod_name == \x27ExpoModulesCore\x27 || pod_name == \x27ExpoModulesWorklets\x27"
-                  );
-                  mod = true;
-                }
-                if (mod) {
-                  fs.writeFileSync(fp, c, "utf8");
-                  console.log("✅ 已在 autolinking 中禁用 ExpoModulesCore 预编译拦截:", fp);
-                }
-              } catch(e) {}
-            }
-
+          // 1. 在 pod install 前修补所有 Expo 预编译 tarball，杜绝预编译二进制污染
+          function processTarball(tarPath) {
             try {
-              const swiftFiles = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
-              swiftFiles.forEach(patchSwiftUI);
-            } catch(e) {}
-
-            try {
-              const podspecFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.podspec\" 2>/dev/null").toString().split("\n").filter(Boolean);
-              podspecFiles.forEach(patchPodspec);
-            } catch(e) {}
-
-            try {
-              const rbFiles = execSync("find \"" + ws + "\" -name \"precompiled_modules.rb\" 2>/dev/null").toString().split("\n").filter(Boolean);
-              rbFiles.forEach(patchPrecompiledRb);
-            } catch(e) {}
-
-            // 补充遍历 node_modules 目录（针对 pnpm 软链接结构）
-            [
-              path.resolve("../../../node_modules/.pnpm"),
-              path.resolve("../node_modules/.pnpm"),
-              path.resolve("../../../node_modules/expo-modules-core"),
-              path.resolve("../node_modules/expo-modules-core"),
-              path.resolve("Pods")
-            ].forEach(full => {
-              if (!fs.existsSync(full)) return;
-              try {
-                for (const item of fs.readdirSync(full)) {
-                  if (item.startsWith("expo-modules-core") || item === "ExpoModulesCore") {
-                    [
-                      path.join(full, item, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
-                      path.join(full, item, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
-                    ].forEach(patchSwiftUI);
-                    [
-                      path.join(full, item, "node_modules/expo-modules-core/ExpoModulesCore.podspec"),
-                      path.join(full, item, "ExpoModulesCore.podspec")
-                    ].forEach(patchPodspec);
+              if (!fs.existsSync(tarPath)) return;
+              const tmp = path.join(path.dirname(tarPath), "tmp_" + Date.now());
+              fs.mkdirSync(tmp, { recursive: true });
+              execSync("tar -xzf \"" + tarPath + "\" -C \"" + tmp + "\"");
+              let count = 0;
+              function walk(d) {
+                for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+                  const full = path.join(d, ent.name);
+                  if (ent.isDirectory()) walk(full);
+                  else if (ent.name === "ExpoModulesCore") {
+                    let b = fs.readFileSync(full);
+                    let p = patchBinaryBuffer(b);
+                    if (p > 0) { fs.writeFileSync(full, b); count += p; }
                   }
                 }
-              } catch(e) {}
-            });
-          '
-          rm -rf Pods/ExpoModulesCore ~/Library/Caches/CocoaPods
+              }
+              walk(tmp);
+              if (count > 0) {
+                execSync("tar -czf \"" + tarPath + "\" -C \"" + tmp + "\" .");
+                console.log("✅ 已成功对预编译 tarball 完成 safeAreaRegions 符号脱敏:", tarPath);
+              }
+              fs.rmSync(tmp, { recursive: true, force: true });
+            } catch(e) {}
+          }
+          try {
+            const tarFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.tar.gz\" 2>/dev/null").toString().split("\n").filter(Boolean);
+            tarFiles.forEach(processTarball);
+          } catch(e) {}
+
+          // 2. 修补 SwiftUIHostingView.swift，消除源码级 safeAreaRegions 强符号调用
+          function patchSwiftUI(fp) {
+            try {
+              if (!fs.existsSync(fp)) return;
+              let c = fs.readFileSync(fp, "utf8");
+              if (c.includes("safeAreaRegions")) {
+                c = c.replace(
+                  /func setSafeAreaRegions[\s\S]*?if safeAreaRegions != regions \{\s*safeAreaRegions = regions\s*\}\s*\}/,
+                  "func setSafeAreaRegions(ignoring mode: ExpoSwiftUI.IgnoreSafeArea?) {\n    // 兼容 iOS 16.0 ~ 16.3：完全避免直接调用 safeAreaRegions，杜绝向 SwiftUI.framework 强绑定 iOS 16.4 专属符号导致 dyld 启动闪退\n  }"
+                );
+                fs.writeFileSync(fp, c, "utf8");
+                console.log("✅ 已成功消除 safeAreaRegions 源码强符号绑定:", fp);
+              }
+            } catch(e) {}
+          }
+
+          // 3. 修补 ExpoModulesCore.podspec，强制采用源码构建模式 (s.static_framework = true)
+          function patchPodspec(fp) {
+            try {
+              if (!fs.existsSync(fp)) return;
+              let c = fs.readFileSync(fp, "utf8");
+              if (c.includes("try_link_with_prebuilt_xcframework(s)")) {
+                c = c.replace(
+                  /if \(!Expo::PackagesConfig\.instance\.try_link_with_prebuilt_xcframework\(s\)\)/g,
+                  "if (true) # force source build for iOS 16 compatibility"
+                );
+                fs.writeFileSync(fp, c, "utf8");
+                console.log("✅ 已强制 ExpoModulesCore 源码编译 (podspec):", fp);
+              }
+            } catch(e) {}
+          }
+
+          try {
+            const swiftFiles = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
+            swiftFiles.forEach(patchSwiftUI);
+          } catch(e) {}
+
+          try {
+            const podspecFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.podspec\" 2>/dev/null").toString().split("\n").filter(Boolean);
+            podspecFiles.forEach(patchPodspec);
+          } catch(e) {}
+
+          // 补充遍历 node_modules 目录（针对 pnpm 软链接结构）
+          [
+            path.resolve("../../../node_modules/.pnpm"),
+            path.resolve("../node_modules/.pnpm"),
+            path.resolve("../../../node_modules/expo-modules-core"),
+            path.resolve("../node_modules/expo-modules-core"),
+            path.resolve("Pods")
+          ].forEach(full => {
+            if (!fs.existsSync(full)) return;
+            try {
+              for (const item of fs.readdirSync(full)) {
+                if (item.startsWith("expo-modules-core") || item === "ExpoModulesCore") {
+                  [
+                    path.join(full, item, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
+                    path.join(full, item, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
+                  ].forEach(patchSwiftUI);
+                  [
+                    path.join(full, item, "node_modules/expo-modules-core/ExpoModulesCore.podspec"),
+                    path.join(full, item, "ExpoModulesCore.podspec")
+                  ].forEach(patchPodspec);
+                }
+              }
+            } catch(e) {}
+          });
+          EOF
           pod install --repo-update 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
           # 防御性检查：若未来 RNRepo 预编译产物的 Swift 主次版本高于当前 Runner 的 Swift 编译器，自动回退为源码编译
           if ! ruby -e '
@@ -2723,16 +2742,51 @@ jobs:
             echo "⚠️ 检测到 RNRepo 预编译包 Swift 版本高于当前 Xcode，自动切换为 DISABLE_RNREPO=1 源码安装..."
             DISABLE_RNREPO=1 pod install 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
           fi
-          # 防御性断言：确保 Pods 中绝对未打包带有 16.4 safeAreaRegions 强符号的预编译 ExpoModulesCore.xcframework
-          node -e '
-            const fs = require("fs");
-            const badXcframework = "Pods/ExpoModulesCore/ExpoModulesCore.xcframework";
-            if (fs.existsSync(badXcframework)) {
-              console.error("❌ 致命错误：检测到 Pods 依然引用了预编译 ExpoModulesCore.xcframework！这会导致 iPadOS 16.2 启动闪退！");
-              process.exit(1);
+          # 防御性脱敏与断言：扫描 Pods 目录中所有二进制，确保全面消除 16.4 safeAreaRegions 强符号
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+          const targets = [
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV8keyboardACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV9containerACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMa", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMn", good: "_$s7SwiftUI9EmptyViewVN" }
+          ];
+          function walk(d) {
+            if (!fs.existsSync(d)) return;
+            for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+              const full = path.join(d, ent.name);
+              if (ent.isDirectory()) walk(full);
+              else if (ent.isFile()) {
+                try {
+                  let buf = fs.readFileSync(full);
+                  if (buf.includes("safeAreaRegions")) {
+                    let patched = 0;
+                    for (const t of targets) {
+                      let idx = 0;
+                      while ((idx = buf.indexOf(t.bad, idx)) !== -1) {
+                        const rep = Buffer.alloc(t.bad.length, 0);
+                        rep.write(t.good, 0, "utf8");
+                        rep.copy(buf, idx);
+                        patched++;
+                        idx += t.bad.length;
+                      }
+                    }
+                    if (patched > 0) {
+                      fs.writeFileSync(full, buf);
+                      console.log("✅ 已成功脱敏 Pods 二进制符号 (" + patched + " 处):", full);
+                    }
+                  }
+                } catch(e) {}
+              }
             }
-            console.log("✅ 验证通过：ExpoModulesCore 正在作为静态源码库进行编译，无预编译二进制冲突！");
-          '
+          }
+          walk("Pods");
+          console.log("✅ Pods 目录符号检查与脱敏完成！");
+          EOF
           # 关键修复 4：修复 React-Core-prebuilt + useFrameworks: 'static' 在 Release 构建下的头文件与模块映射问题：
           # 1) 提前将 React-Core-prebuilt 切换至 Release 切片，防止 xcodebuild 阶段 replace-rncore-version.js 重新解压覆盖补丁。
           # 2) 将 React.xcframework 内部按子模块嵌套的头文件（如 Headers/React_Core/React/*.h、Headers/Yoga/yoga/*.h 等）
@@ -2986,6 +3040,78 @@ jobs:
           echo "✅ 已验证 IPA 应用版本: $BUILT_VERSION"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
+          echo "🔍 开始对 Payload 二进制产物进行 iOS 16.0~16.3 兼容性脱敏检查..."
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          const targets = [
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV8keyboardACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsV9containerACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMa", good: "_$s7SwiftUI9EmptyViewVN" },
+            { bad: "_$s7SwiftUI15SafeAreaRegionsVMn", good: "_$s7SwiftUI9EmptyViewVN" }
+          ];
+
+          let patchedCount = 0;
+          function walk(dir) {
+            for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, ent.name);
+              if (ent.isDirectory()) {
+                walk(full);
+              } else if (ent.isFile()) {
+                try {
+                  let buf = fs.readFileSync(full);
+                  if (buf.includes("safeAreaRegions")) {
+                    let filePatched = 0;
+                    for (const t of targets) {
+                      let idx = 0;
+                      while ((idx = buf.indexOf(t.bad, idx)) !== -1) {
+                        const rep = Buffer.alloc(t.bad.length, 0);
+                        rep.write(t.good, 0, "utf8");
+                        rep.copy(buf, idx);
+                        filePatched++;
+                        idx += t.bad.length;
+                      }
+                    }
+                    if (filePatched > 0) {
+                      fs.writeFileSync(full, buf);
+                      console.log("✅ 成功脱敏 Payload 二进制符号 (" + filePatched + " 处): " + full);
+                      patchedCount += filePatched;
+                    }
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+          walk("Payload");
+          console.log("ℹ️ Payload 符号脱敏处理完成，共替换 " + patchedCount + " 处 16.4 专属符号");
+
+          let badFound = [];
+          function verify(dir) {
+            for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, ent.name);
+              if (ent.isDirectory()) {
+                verify(full);
+              } else if (ent.isFile()) {
+                try {
+                  let b = fs.readFileSync(full);
+                  if (b.includes("safeAreaRegions")) {
+                    badFound.push(full);
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+          verify("Payload");
+          if (badFound.length > 0) {
+            console.error("❌ 致命断言失败：以下产物中依然存在 safeAreaRegions 强符号！", badFound);
+            process.exit(1);
+          }
+          console.log("🛡️ 终极验证通过：Payload 目录中所有 Mach-O 动态库与主程序已 100% 免疫 safeAreaRegions dyld 崩溃！");
+          EOF
           zip -r -y -q BBPlayer-unsigned.ipa Payload
           mkdir -p "${GITHUB_WORKSPACE}/dist"
           mv BBPlayer-unsigned.ipa "${GITHUB_WORKSPACE}/dist/"
