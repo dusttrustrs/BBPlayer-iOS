@@ -2631,7 +2631,7 @@ jobs:
           function processTarball(tarPath) {
             try {
               if (!fs.existsSync(tarPath)) return;
-              const tmp = path.join(path.dirname(tarPath), "tmp_" + Date.now());
+              const tmp = path.join(path.dirname(tarPath), "tmp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6));
               fs.mkdirSync(tmp, { recursive: true });
               execSync("tar -xzf \"" + tarPath + "\" -C \"" + tmp + "\"");
               let count = 0;
@@ -2639,7 +2639,7 @@ jobs:
                 for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
                   const full = path.join(d, ent.name);
                   if (ent.isDirectory()) walk(full);
-                  else if (ent.name === "ExpoModulesCore") {
+                  else if (ent.name === "ExpoModulesCore" || ent.name.endsWith(".dylib") || ent.name.endsWith(".a")) {
                     let b = fs.readFileSync(full);
                     let p = patchBinaryBuffer(b);
                     if (p > 0) { fs.writeFileSync(full, b); count += p; }
@@ -2649,13 +2649,13 @@ jobs:
               walk(tmp);
               if (count > 0) {
                 execSync("tar -czf \"" + tarPath + "\" -C \"" + tmp + "\" .");
-                console.log("✅ 已成功对预编译 tarball 完成 safeAreaRegions 符号脱敏:", tarPath);
+                console.log("✅ 已成功对预编译 tarball 完成 safeAreaRegions 符号脱敏 (" + count + " 处):", tarPath);
               }
               fs.rmSync(tmp, { recursive: true, force: true });
             } catch(e) {}
           }
           try {
-            const tarFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.tar.gz\" 2>/dev/null").toString().split("\n").filter(Boolean);
+            const tarFiles = execSync("find \"" + ws + "\" -name \"*ExpoModulesCore*.tar.gz\" 2>/dev/null").toString().split("\n").filter(Boolean);
             tarFiles.forEach(processTarball);
           } catch(e) {}
 
@@ -2675,30 +2675,9 @@ jobs:
             } catch(e) {}
           }
 
-          // 3. 修补 ExpoModulesCore.podspec，强制采用源码构建模式 (s.static_framework = true)
-          function patchPodspec(fp) {
-            try {
-              if (!fs.existsSync(fp)) return;
-              let c = fs.readFileSync(fp, "utf8");
-              if (c.includes("try_link_with_prebuilt_xcframework(s)")) {
-                c = c.replace(
-                  /if \(!Expo::PackagesConfig\.instance\.try_link_with_prebuilt_xcframework\(s\)\)/g,
-                  "if (true) # force source build for iOS 16 compatibility"
-                );
-                fs.writeFileSync(fp, c, "utf8");
-                console.log("✅ 已强制 ExpoModulesCore 源码编译 (podspec):", fp);
-              }
-            } catch(e) {}
-          }
-
           try {
             const swiftFiles = execSync("find \"" + ws + "\" -name \"SwiftUIHostingView.swift\" 2>/dev/null").toString().split("\n").filter(Boolean);
             swiftFiles.forEach(patchSwiftUI);
-          } catch(e) {}
-
-          try {
-            const podspecFiles = execSync("find \"" + ws + "\" -name \"ExpoModulesCore.podspec\" 2>/dev/null").toString().split("\n").filter(Boolean);
-            podspecFiles.forEach(patchPodspec);
           } catch(e) {}
 
           // 补充遍历 node_modules 目录（针对 pnpm 软链接结构）
@@ -2717,10 +2696,6 @@ jobs:
                     path.join(full, item, "node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"),
                     path.join(full, item, "ios/Core/Views/SwiftUI/SwiftUIHostingView.swift")
                   ].forEach(patchSwiftUI);
-                  [
-                    path.join(full, item, "node_modules/expo-modules-core/ExpoModulesCore.podspec"),
-                    path.join(full, item, "ExpoModulesCore.podspec")
-                  ].forEach(patchPodspec);
                 }
               }
             } catch(e) {}
