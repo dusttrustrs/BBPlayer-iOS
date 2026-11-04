@@ -2446,7 +2446,7 @@ jobs:
           if (appDelegatePath) {
             const pureAppDelegate = [
               'import UIKit',
-              'import ExpoModulesCore',
+              'internal import ExpoModulesCore',
               'import React',
               '',
               '@main',
