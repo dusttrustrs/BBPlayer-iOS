@@ -2348,6 +2348,22 @@ jobs:
       - name: 📱 生成 iOS 16.2 原生工程 (Expo Prebuild)
         run: |
           cd apps/mobile
+          # 关键修复：将 react-native-screens 加入 RNRepo iOS 预编译黑名单 (denyList.ios)
+          # 原因：RNRepo 预编译的 RNScreens.xcframework 仅包含文本格式的 .swiftinterface（无二进制 .swiftmodule），
+          # 而 ExpoRouter (Swift) 在 import RNScreens 时会触发 swiftc 的 ModuleInterfaceLoader 启动隔离子编译器，
+          # 该子编译器会强制剥离父进程的所有 -Xcc 参数（包括 -Xcc -ivfsoverlay React-VFS.yaml），导致 RNScreens 伞形头文件报错找不到 <React/RCTEventDispatcherProtocol.h>。
+          # 将 react-native-screens 设为源码编译后，Expo 会将其编译为静态库并生成二进制 RNScreens.swiftmodule，彻底规避 .swiftinterface 子编译问题。
+          node -e '
+            const fs = require("fs");
+            const cfgPath = "rnrepo.config.json";
+            const cfg = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
+            cfg.denyList = cfg.denyList || {};
+            const iosDeny = new Set(Array.isArray(cfg.denyList.ios) ? cfg.denyList.ios : []);
+            iosDeny.add("react-native-screens");
+            cfg.denyList.ios = Array.from(iosDeny);
+            fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+            console.log("✅ 已配置 apps/mobile/rnrepo.config.json:", JSON.stringify(cfg));
+          '
           npx expo prebuild --platform ios --clean --no-install
 
       - name: 🛠️ 锁定 iOS 16.0 纯净原生工程架构 (纯 UIWindow 生命周期与防崩拦截)
