@@ -2382,13 +2382,14 @@ jobs:
               } else if (f.name === "project.pbxproj") {
                 let pbx = fs.readFileSync(full, "utf8");
                 const old = pbx;
-                pbx = pbx.replace(/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.0;");
-                pbx = pbx.replace(/(/* [^*]+ */ = {[sS]*?buildSettings = {[sS]*?};[sS]*?};)/g, (block) => {
-                  if (block.includes("ExpoWidgetsTarget") || block.includes("ExpoWidgets")) {
-                    return block.replace(/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.2;");
+                pbx = pbx.replace(/IPHONEOS_DEPLOYMENT_TARGET *= *[0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.0;");
+                const blocks = pbx.split("};");
+                for (let b = 0; b < blocks.length; b++) {
+                  if (blocks[b].includes("ExpoWidgetsTarget") || blocks[b].includes("ExpoWidgets")) {
+                    blocks[b] = blocks[b].replace(/IPHONEOS_DEPLOYMENT_TARGET *= *[0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.2;");
                   }
-                  return block;
-                });
+                }
+                pbx = blocks.join("};");
                 if (pbx !== old) {
                   fs.writeFileSync(full, pbx, "utf8");
                   console.log("✅ 已锁定 Xcode 项目部署目标 (主应用 16.0，Widgets 16.2):", full);
