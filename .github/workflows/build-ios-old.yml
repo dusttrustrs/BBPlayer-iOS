@@ -2412,7 +2412,7 @@ jobs:
               '    return super.application(application, didFinishLaunchingWithOptions: launchOptions)',
               '  }',
               '}'
-            ].join('\\n');
+            ].join('\n');
             fs.writeFileSync(appDelegatePath, pureAppDelegate, "utf8");
             console.log("✅ AppDelegate.swift: 已重构为纯净 UIWindow 架构并挂载 RCTSetFatalHandler 全局防崩拦截器:", appDelegatePath);
           }
@@ -2447,8 +2447,8 @@ jobs:
                 patchExpoPlist(full);
               } else if (f.name === "Expo.plist") {
                 let content = fs.readFileSync(full, "utf8");
-                content = content.replace(/<key>EXUpdatesEnabled<\/key>\s*<true\/>/, "<key>EXUpdatesEnabled</key>\\n    <false/>");
-                content = content.replace(/<key>EXUpdatesCheckOnLaunch<\/key>\s*<string>ALWAYS<\/string>/, "<key>EXUpdatesCheckOnLaunch</key>\\n    <string>NEVER</string>");
+                content = content.replace(/<key>EXUpdatesEnabled<\/key>\s*<true\/>/, "<key>EXUpdatesEnabled</key>\n    <false/>");
+                content = content.replace(/<key>EXUpdatesCheckOnLaunch<\/key>\s*<string>ALWAYS<\/string>/, "<key>EXUpdatesCheckOnLaunch</key>\n    <string>NEVER</string>");
                 fs.writeFileSync(full, content, "utf8");
                 console.log("✅ Expo.plist: 已彻底禁用远程 OTA 更新与 ErrorRecovery 队列:", full);
               }
@@ -2469,7 +2469,7 @@ jobs:
           let podfile = fs.readFileSync("Podfile", "utf8");
           podfile = podfile.replace(/platform :ios, ['"][0-9.]+['"]/, "platform :ios, '16.0'");
           if (!podfile.includes("$RNFirebaseDisableSPM = true")) {
-            podfile = "$RNFirebaseDisableSPM = true\\n" + podfile;
+            podfile = "$RNFirebaseDisableSPM = true\n" + podfile;
           }
           if (!podfile.includes("SWIFT_PACKAGE_NO_MACROS")) {
             const postInstallAnchor = "post_install do |installer|";
@@ -2483,7 +2483,7 @@ jobs:
                 "        config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] += ' SWIFT_PACKAGE_NO_MACROS'",
                 "      end",
                 "    end"
-              ].join('\\n');
+              ].join('\n');
               podfile = podfile.replace(postInstallAnchor, postInstallCode);
             }
           }
