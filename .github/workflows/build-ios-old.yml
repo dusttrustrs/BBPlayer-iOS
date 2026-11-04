@@ -42,13 +42,15 @@ jobs:
           node-version: 22.x
 
       - name: 📦 配置 pnpm
-        uses: pnpm/setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          cache: false
+          run_install: false
 
       - name: 📥 安装依赖
+        env:
+          LEFTHOOK: "0"
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --no-frozen-lockfile
 
       - name: 🩹 修复 ExpoOrpheus 在 iOS 16 SDK 下的编译与配置
         run: |
