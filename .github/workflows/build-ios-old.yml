@@ -2372,7 +2372,7 @@ jobs:
           const fs = require("fs");
           const path = require("path");
 
-          // 1. 递归锁定所有 Xcode 工程配置中的 IPHONEOS_DEPLOYMENT_TARGET 为 16.0
+          // 1. 递归锁定所有 Xcode 工程配置中的 IPHONEOS_DEPLOYMENT_TARGET（主工程 16.0，ExpoWidgetsTarget 锁定 16.2 适配实时活动）
           function patchPbxproj(dir) {
             if (!fs.existsSync(dir)) return;
             for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -2383,14 +2383,47 @@ jobs:
                 let pbx = fs.readFileSync(full, "utf8");
                 const old = pbx;
                 pbx = pbx.replace(/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.0;");
+                pbx = pbx.replace(/(/* [^*]+ */ = {[sS]*?buildSettings = {[sS]*?};[sS]*?};)/g, (block) => {
+                  if (block.includes("ExpoWidgetsTarget") || block.includes("ExpoWidgets")) {
+                    return block.replace(/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;/g, "IPHONEOS_DEPLOYMENT_TARGET = 16.2;");
+                  }
+                  return block;
+                });
                 if (pbx !== old) {
                   fs.writeFileSync(full, pbx, "utf8");
-                  console.log("✅ 已锁定 Xcode 项目部署目标为 iOS 16.0:", full);
+                  console.log("✅ 已锁定 Xcode 项目部署目标 (主应用 16.0，Widgets 16.2):", full);
                 }
               }
             }
           }
           patchPbxproj("apps/mobile/ios");
+
+          // 2. 递归查找并修补 ExpoWidgetsTarget/index.swift 增加 iOS 16.1+ 守卫
+          function patchWidgetSwift(dir) {
+            if (!fs.existsSync(dir)) return;
+            for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, f.name);
+              if (f.isDirectory() && f.name !== ".git") {
+                patchWidgetSwift(full);
+              } else if (f.name.endsWith(".swift") && full.includes("ExpoWidgetsTarget")) {
+                let code = fs.readFileSync(full, "utf8");
+                let mod = false;
+                if (code.includes("WidgetLiveActivity()") && !code.includes("/* iOS 16.1 LiveActivity guard */")) {
+                  code = code.replace("WidgetLiveActivity()", "/* iOS 16.1 LiveActivity guard */\n    if #available(iOS 16.1, *) {\n      WidgetLiveActivity()\n    }");
+                  mod = true;
+                }
+                if (code.includes("struct ExportWidgets0: WidgetBundle") && !code.includes("@available(iOS 16.1, *)")) {
+                  code = code.replace("struct ExportWidgets0: WidgetBundle", "@available(iOS 16.1, *)\nstruct ExportWidgets0: WidgetBundle");
+                  mod = true;
+                }
+                if (mod) {
+                  fs.writeFileSync(full, code, "utf8");
+                  console.log("✅ 已成功为 ExpoWidgetsTarget 补充 iOS 16.1+ 守卫:", full);
+                }
+              }
+            }
+          }
+          patchWidgetSwift("apps/mobile/ios");
 
           // 2. 递归查找并重构 AppDelegate.swift：使用纯净 UIWindow 生命周期并注册 React Native 全局防崩溃处理器
           function findAppDelegate(dir) {
@@ -2504,7 +2537,11 @@ jobs:
                 postInstallAnchor,
                 "    installer.pods_project.targets.each do |target|",
                 "      target.build_configurations.each do |config|",
-                "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'",
+                "        if target.name.include?('ExpoWidgets')",
+                "          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.2'",
+                "        else",
+                "          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'",
+                "        end",
                 "        config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] ||= '$(inherited)'",
                 "        config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] += ' SWIFT_PACKAGE_NO_MACROS'",
                 "      end",
