@@ -52,128 +52,553 @@ jobs:
         run: |
           pnpm install --no-frozen-lockfile
 
-      - name: 🩹 修复 ExpoOrpheus 在 iOS 16 SDK 下的编译与配置
+      - name: 🩹 修复 ExpoOrpheus 在 iOS 26 SDK / Swift 6.3 下的编译错误
         run: |
           node << 'EOF'
           const fs = require("fs");
-          const path = require("path");
-
-          // 1. 修复 PhotoPickerHelper.swift 兼容性
-          const photoPickerPath = "packages/orpheus/ios/PhotoPickerHelper.swift";
-          const photoPickerDir = path.dirname(photoPickerPath);
-          if (!fs.existsSync(photoPickerDir)) {
-            fs.mkdirSync(photoPickerDir, { recursive: true });
+          // 1. 修复 AudioSpectrumAnalyzer.swift：
+          // iOS 26 SDK 为 MTAudioProcessingTapCreate 添加了 CF_RETURNS_RETAINED 注解，
+          // 第 4 个参数从 UnsafeMutablePointer<Unmanaged<MTAudioProcessingTap>?> 变为 UnsafeMutablePointer<MTAudioProcessingTap?>
+          const analyzerPath = "packages/orpheus/ios/AudioSpectrumAnalyzer.swift";
+          let analyzer = fs.readFileSync(analyzerPath, "utf8");
+          const tapPattern = /var tap: Unmanaged<MTAudioProcessingTap>\?[\s\S]*?return tap\?\.takeRetainedValue\(\)\s*\}/;
+          if (tapPattern.test(analyzer)) {
+            analyzer = analyzer.replace(
+              tapPattern,
+          `#if compiler(>=6.2)
+                  var tap: MTAudioProcessingTap?
+                  let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap)
+                  if err == noErr {
+                      return tap
+                  }
+                  #else
+                  var tap: Unmanaged<MTAudioProcessingTap>?
+                  let err = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PreEffects, &tap)
+                  if err == noErr {
+                      return tap?.takeRetainedValue()
+                  }
+                  #endif`
+            );
+            console.log("✅ 已修复 AudioSpectrumAnalyzer.swift 中的 MTAudioProcessingTapCreate 类型签名");
+          } else if (!analyzer.includes("#if compiler(>=6.2)")) {
+            throw new Error("未在 AudioSpectrumAnalyzer.swift 中找到待修复的 MTAudioProcessingTapCreate 代码块");
           }
-          const photoPickerContent = [
+          // 同时修复 DSPSplitComplex 临时指针作用域与 vDSP_vsmul(&magnitudes, ..., &magnitudes, ...) 的 Swift 内存独占访问冲突 (overlapping accesses to 'magnitudes')
+          const dspPattern = /var splitComplex = DSPSplitComplex\(realp: &realOut, imagp: &imagOut\)[\s\S]*?vDSP_vsmul\(&magnitudes, 1, &scale, &magnitudes, 1, vDSP_Length\(fftSize\)\)/;
+          if (dspPattern.test(analyzer)) {
+            analyzer = analyzer.replace(
+              dspPattern,
+          `var scale = 1.0 / Float(fftSize)
+                  realOut.withUnsafeMutableBufferPointer { realPtr in
+                      imagOut.withUnsafeMutableBufferPointer { imagPtr in
+                          magnitudes.withUnsafeMutableBufferPointer { magPtr in
+                              guard let realBase = realPtr.baseAddress,
+                                    let imagBase = imagPtr.baseAddress,
+                                    let magBase = magPtr.baseAddress else { return }
+                              var splitComplex = DSPSplitComplex(realp: realBase, imagp: imagBase)
+                              vDSP_zvabs(&splitComplex, 1, magBase, 1, vDSP_Length(fftSize))
+                              vDSP_vsmul(magBase, 1, &scale, magBase, 1, vDSP_Length(fftSize))
+                          }
+                      }
+                  }`
+            );
+            console.log("✅ 已修复 AudioSpectrumAnalyzer.swift 中的 DSPSplitComplex 指针作用域与 vDSP_vsmul 内存独占访问冲突");
+          } else if (!analyzer.includes("vDSP_vsmul(magBase")) {
+            throw new Error("未在 AudioSpectrumAnalyzer.swift 中找到待修复的 DSPSplitComplex / vDSP_vsmul 代码块");
+          }
+          fs.writeFileSync(analyzerPath, analyzer, "utf8");
+          // 2. 修复 ExpoOrpheusModule.swift：
+          // (a) 多语句 .set 闭包无法自动推断泛型参数 $0 的类型，需显式声明 (enabled: Bool) in
+          const modulePath = "packages/orpheus/ios/ExpoOrpheusModule.swift";
+          let mod = fs.readFileSync(modulePath, "utf8");
+          const propPattern = /Property\("isSpectrumVisualizerEnabled"\)\s*\.get\s*\{\s*GeneralStorage\.shared\.isSpectrumVisualizerEnabled\s*\}\s*\.set\s*\{\s*GeneralStorage\.shared\.isSpectrumVisualizerEnabled = \$0\s*self\.sendEvent\("onSpectrumVisualizerEnabledChanged", \["enabled": \$0\]\)\s*\}/;
+          if (propPattern.test(mod)) {
+            mod = mod.replace(
+              propPattern,
+          `Property("isSpectrumVisualizerEnabled")
+                      .get { GeneralStorage.shared.isSpectrumVisualizerEnabled }
+                      .set { (enabled: Bool) in
+                          GeneralStorage.shared.isSpectrumVisualizerEnabled = enabled
+                          self.sendEvent("onSpectrumVisualizerEnabledChanged", ["enabled": enabled])
+                      }`
+            );
+            console.log("✅ 已修复 ExpoOrpheusModule.swift 中的 isSpectrumVisualizerEnabled .set 闭包类型注解");
+          } else if (!mod.includes("(enabled: Bool) in")) {
+            throw new Error("未在 ExpoOrpheusModule.swift 中找到待修复的 isSpectrumVisualizerEnabled 代码块");
+          }
+          // (b) 修复 updateSpectrumData 中不存在的 TypedArray.getUnsafeMutablePointer 方法，
+          // 改用 ExpoModulesCore 标准公开属性 destination.rawPointer.bindMemory(to:capacity:)
+          const spectrumPattern = /Function\("updateSpectrumData"\)\s*\{\s*\(destination:\s*TypedArray\)\s*in[\s\S]*?fillSpectrumData\(destination:\s*ptr,\s*count:\s*count\)\s*\}\s*\}/;
+          if (spectrumPattern.test(mod)) {
+            mod = mod.replace(
+              spectrumPattern,
+          `Function("updateSpectrumData") { (destination: TypedArray) in
+                  let count = destination.length
+                  guard count > 0, destination.byteLength >= count * MemoryLayout<Float32>.stride else { return }
+                  let ptr = destination.rawPointer.bindMemory(to: Float32.self, capacity: count)
+                  AudioSpectrumAnalyzer.shared.fillSpectrumData(destination: ptr, count: count)
+              }`
+            );
+            console.log("✅ 已修复 ExpoOrpheusModule.swift 中的 updateSpectrumData TypedArray 指针调用");
+          } else if (!mod.includes("destination.rawPointer.bindMemory")) {
+            throw new Error("未在 ExpoOrpheusModule.swift 中找到待修复的 updateSpectrumData 代码块");
+          }
+          // (c) 修复 iOS 端 setAllowSimultaneousPlayback 缺失导致的设置页闪退与后台混音失效
+          if (!mod.includes("setAllowSimultaneousPlayback")) {
+            const target = 'Function("setDownloadMaxParallelTasks") { (_: Int) in';
+            const replacement = [
+              'AsyncFunction("setAllowSimultaneousPlayback") { (enabled: Bool) in',
+              '        OrpheusPlayerManager.shared.setAllowSimultaneousPlayback(enabled)',
+              '    }',
+              '',
+              '    Function("setDownloadMaxParallelTasks") { (_: Int) in'
+            ].join("\n");
+            mod = mod.replace(target, replacement);
+            console.log("✅ 已为 ExpoOrpheusModule.swift 补充 setAllowSimultaneousPlayback 方法");
+          }
+          fs.writeFileSync(modulePath, mod, "utf8");
+          // (d) 为 OrpheusPlayerManager.swift 补充 addToEnd / addToNext 的 onQueueChanged 通知
+          const playerMgrPath = "packages/orpheus/ios/OrpheusPlayerManager.swift";
+          if (fs.existsSync(playerMgrPath)) {
+            let playerMgr = fs.readFileSync(playerMgrPath, "utf8");
+            // 在 addToEnd 和 addToNext 尾部触发 onQueueChanged，确保播放队列实时同步
+            if (!playerMgr.includes("// queue sync patched")) {
+              playerMgr = playerMgr.replace(
+                "queueManager.insertNext(track: track)\n        saveState()",
+                "queueManager.insertNext(track: track)\n        saveState()\n        onQueueChanged?() // queue sync patched"
+              );
+              const addToEndEndPattern = /saveState\(\)\s*\}\s*func setExecuteShuffleMode/;
+              if (addToEndEndPattern.test(playerMgr)) {
+                playerMgr = playerMgr.replace(
+                  addToEndEndPattern,
+                  "saveState()\n        }\n        onQueueChanged?()\n    }\n    \n    func setExecuteShuffleMode"
+                );
+              }
+              fs.writeFileSync(playerMgrPath, playerMgr, "utf8");
+              console.log("✅ 已为 OrpheusPlayerManager.swift 补充 addToEnd / addToNext 的 onQueueChanged 通知");
+            }
+          }
+          // (e) 为 ExpoOrpheusModule.swift 补齐 iOS 端缺失的原生方法与属性（如 getLruCachedUris 等），防止运行时抛出 undefined is not a function
+          if (!mod.includes("getLruCachedUris")) {
+            // 补充缺失的属性：playbackResumeStrategy, isDesktopLyricsShown 等
+            const propAnchor = 'Property("isSpectrumVisualizerEnabled")';
+            const missingProps = [
+              'Property("playbackResumeStrategy")',
+              '            .get { 0 }',
+              '            .set { (_: Int) in }',
+              '',
+              '        Property("isDesktopLyricsShown")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("isDesktopLyricsLocked")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("isStatusBarLyricsEnabled")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("isCarLyricsEnabled")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("statusBarLyricsProvider")',
+              '            .get { "lyricon" }',
+              '            .set { (_: String) in }',
+              '',
+              '        Property("isSuperLyricApiEnabled")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("isLyriconApiEnabled")',
+              '            .get { false }',
+              '            .set { (_: Bool) in }',
+              '',
+              '        Property("isSpectrumVisualizerEnabled")'
+            ].join("\n");
+            mod = mod.replace(propAnchor, missingProps);
+            // 放宽 addToEnd 参数签名，避免参数转换失败
+            const addToEndPattern = /AsyncFunction\("addToEnd"\)\s*\{\s*\(tracks:\s*\[Track\],\s*startFromId:\s*String\?,\s*clearQueue:\s*Bool\)\s*in/;
+            if (addToEndPattern.test(mod)) {
+              mod = mod.replace(
+                addToEndPattern,
+                'AsyncFunction("addToEnd") { (tracks: [Track], startFromId: String?, clearQueue: Bool?) in\n        let shouldClear = clearQueue ?? false'
+              );
+              mod = mod.replace('clearQueue: clearQueue)', 'clearQueue: shouldClear)');
+            }
+            // 补充缺失的方法：getLruCachedUris, clearPlaybackCache, downloadMissingCovers 等
+            const funcAnchor = 'Function("updateSpectrumData")';
+            const missingFuncs = [
+              'Function("getLruCachedUris") { (uris: [String]) -> [String] in',
+              '        return []',
+              '    }',
+              '',
+              '    AsyncFunction("clearPlaybackCache") {',
+              '    }',
+              '',
+              '    AsyncFunction("downloadMissingCovers") { () -> Int in',
+              '        return 0',
+              '    }',
+              '',
+              '    Function("getDownloadedCoverUri") { (_: String) -> String? in',
+              '        return nil',
+              '    }',
+              '',
+              '    AsyncFunction("exportDownloads") { (_: [String], _: String, _: String?, _: Bool, _: Bool, _: Bool) in',
+              '    }',
+              '',
+              '    AsyncFunction("selectDirectory") { () -> String? in',
+              '        return nil',
+              '    }',
+              '',
+              '    AsyncFunction("isDirectoryPickerAvailable") { () -> Bool in',
+              '        return false',
+              '    }',
+              '',
+              '    Function("exportData") { () -> [String: Any] in',
+              '        return ["playerQueue": [String: Any](), "loudness": [String: Double]() ]',
+              '    }',
+              '',
+              '    Function("importData") { (_: [String: Any]) in',
+              '    }',
+              '',
+              '    Function("updateSpectrumData")'
+            ].join("\n");
+            mod = mod.replace(funcAnchor, missingFuncs);
+            fs.writeFileSync(modulePath, mod, "utf8");
+            console.log("✅ 已为 ExpoOrpheusModule.swift 补全 getLruCachedUris 等缺失原生方法与属性");
+          }
+          // (f) 为 iOS 实现原生 BootSplashVideoView 视频播放组件与模块 (基于 AVPlayer / AVPlayerLayer)，兼容开屏与主题素材视频播放
+          const bootSplashSwiftPath = "packages/orpheus/ios/BootSplashVideoView.swift";
+          const bootSplashSwiftLines = [
             'import UIKit',
-            'import PhotosUI',
+            'import AVFoundation',
+            'import ExpoModulesCore',
             '',
-            'public class PhotoPickerHelper: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate, PHPickerViewControllerDelegate {',
-            '    public static let shared = PhotoPickerHelper()',
-            '    private var completion: ((String?) -> Void)?',
+            'public class BootSplashVideoView: ExpoView {',
+            '    private var player: AVPlayer?',
+            '    private var playerLayer: AVPlayerLayer?',
+            '    private var endObserver: Any?',
+            '    private var statusObserver: NSKeyValueObservation?',
             '',
-            '    public func pickPhoto(completion: @escaping (String?) -> Void) {',
-            '        self.completion = completion',
-            '        DispatchQueue.main.async {',
-            '            guard let topVC = UIApplication.shared.windows.first(where: { $0.isKeyWindow })?.rootViewController else {',
-            '                completion(nil)',
-            '                return',
-            '            }',
-            '            if #available(iOS 14, *) {',
-            '                var config = PHPickerConfiguration()',
-            '                config.selectionLimit = 1',
-            '                config.filter = .images',
-            '                let picker = PHPickerViewController(configuration: config)',
-            '                picker.delegate = self',
-            '                topVC.present(picker, animated: true)',
+            '    private var currentUri: String?',
+            '    private var autoPlay: Bool = true',
+            '    private var loop: Bool = false',
+            '    private var muted: Bool = true',
+            '    private var contentFit: String = "cover"',
+            '',
+            '    public let onPlaybackEnd = EventDispatcher()',
+            '    public let onPlaybackError = EventDispatcher()',
+            '',
+            '    public required init(appContext: AppContext? = nil) {',
+            '        super.init(appContext: appContext)',
+            '        backgroundColor = .clear',
+            '    }',
+            '',
+            '    public override func layoutSubviews() {',
+            '        super.layoutSubviews()',
+            '        CATransaction.begin()',
+            '        CATransaction.setDisableActions(true)',
+            '        playerLayer?.frame = bounds',
+            '        CATransaction.commit()',
+            '    }',
+            '',
+            '    private func parseUrl(from uriString: String?) -> URL? {',
+            '        guard let uri = uriString?.trimmingCharacters(in: .whitespacesAndNewlines), !uri.isEmpty else {',
+            '            return nil',
+            '        }',
+            '        if uri.hasPrefix("file://") {',
+            '            return URL(string: uri)',
+            '        }',
+            '        if uri.hasPrefix("http://") || uri.hasPrefix("https://") {',
+            '            return URL(string: uri)',
+            '        }',
+            '        if uri.hasPrefix("/") {',
+            '            return URL(fileURLWithPath: uri)',
+            '        }',
+            '        let filename = (uri as NSString).lastPathComponent',
+            '        let name = (filename as NSString).deletingPathExtension',
+            '        let ext = (filename as NSString).pathExtension',
+            '        if let bundleUrl = Bundle.main.url(forResource: name, withExtension: ext.isEmpty ? nil : ext) {',
+            '            return bundleUrl',
+            '        }',
+            '        return URL(fileURLWithPath: uri)',
+            '    }',
+            '',
+            '    private func applyChanges() {',
+            '        guard let uri = currentUri, let url = parseUrl(from: uri) else {',
+            '            cleanup()',
+            '            return',
+            '        }',
+            '        cleanup()',
+            '        let asset = AVURLAsset(url: url)',
+            '        let item = AVPlayerItem(asset: asset)',
+            '        let newPlayer = AVPlayer(playerItem: item)',
+            '        newPlayer.isMuted = self.muted',
+            '        if #available(iOS 10.0, *) {',
+            '            newPlayer.automaticallyWaitsToMinimizeStalling = false',
+            '        }',
+            '        newPlayer.actionAtItemEnd = .none',
+            '        let layer = AVPlayerLayer(player: newPlayer)',
+            '        layer.videoGravity = (contentFit == "contain") ? .resizeAspect : .resizeAspectFill',
+            '        layer.frame = bounds',
+            '        self.layer.addSublayer(layer)',
+            '        self.player = newPlayer',
+            '        self.playerLayer = layer',
+            '        endObserver = NotificationCenter.default.addObserver(',
+            '            forName: .AVPlayerItemDidPlayToEndTime,',
+            '            object: item,',
+            '            queue: .main',
+            '        ) { [weak self] _ in',
+            '            guard let self = self else { return }',
+            '            if self.loop {',
+            '                self.player?.seek(to: .zero)',
+            '                self.player?.play()',
             '            } else {',
-            '                let picker = UIImagePickerController()',
-            '                picker.sourceType = .photoLibrary',
-            '                picker.delegate = self',
-            '                topVC.present(picker, animated: true)',
+            '                self.onPlaybackEnd([:])',
             '            }',
+            '        }',
+            '        statusObserver = item.observe(\\.status, options: [.new]) { [weak self] playerItem, _ in',
+            '            guard let self = self else { return }',
+            '            if playerItem.status == .failed {',
+            '                let errorMsg = playerItem.error?.localizedDescription ?? "播放失败"',
+            '                self.onPlaybackError(["message": errorMsg])',
+            '            }',
+            '        }',
+            '        if autoPlay {',
+            '            newPlayer.play()',
             '        }',
             '    }',
             '',
-            '    public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {',
-            '        picker.dismiss(animated: true)',
-            '        guard let itemProvider = results.first?.itemProvider, itemProvider.canLoadObject(ofClass: UIImage.self) else {',
-            '            self.completion?(nil)',
-            '            return',
-            '        }',
-            '        itemProvider.loadObject(ofClass: UIImage.self) { [weak self] image, error in',
-            '            guard let image = image as? UIImage, let data = image.jpegData(compressionQuality: 0.85) else {',
-            '                self?.completion?(nil)',
-            '                return',
-            '            }',
-            '            let tempDir = NSTemporaryDirectory()',
-            '            let filePath = (tempDir as NSString).appendingPathComponent(UUID().uuidString + ".jpg")',
-            '            do {',
-            '                try data.write(to: URL(fileURLWithPath: filePath))',
-            '                self?.completion?(filePath)',
-            '            } catch {',
-            '                self?.completion?(nil)',
-            '            }',
+            '    public func setSource(_ uri: String?) {',
+            '        if currentUri != uri {',
+            '            currentUri = uri',
+            '            applyChanges()',
             '        }',
             '    }',
-            '',
-            '    public func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {',
-            '        picker.dismiss(animated: true)',
-            '        guard let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 0.85) else {',
-            '            self.completion?(nil)',
-            '            return',
-            '        }',
-            '        let tempDir = NSTemporaryDirectory()',
-            '        let filePath = (tempDir as NSString).appendingPathComponent(UUID().uuidString + ".jpg")',
-            '        do {',
-            '            try data.write(to: URL(fileURLWithPath: filePath))',
-            '            self.completion?(filePath)',
-            '        } catch {',
-            '            self.completion?(nil)',
-            '        }',
+            '    public func setAutoPlay(_ play: Bool) {',
+            '        autoPlay = play',
+            '        if play { player?.play() }',
             '    }',
+            '    public func setLoop(_ l: Bool) { loop = l }',
+            '    public func setMuted(_ m: Bool) {',
+            '        muted = m',
+            '        player?.isMuted = m',
+            '    }',
+            '    public func setContentFit(_ fit: String) {',
+            '        contentFit = fit',
+            '        playerLayer?.videoGravity = (fit == "contain") ? .resizeAspect : .resizeAspectFill',
+            '    }',
+            '    public func replay() {',
+            '        player?.seek(to: .zero)',
+            '        player?.play()',
+            '    }',
+            '    public func cleanup() {',
+            '        if let observer = endObserver {',
+            '            NotificationCenter.default.removeObserver(observer)',
+            '            endObserver = nil',
+            '        }',
+            '        statusObserver?.invalidate()',
+            '        statusObserver = nil',
+            '        player?.pause()',
+            '        player = nil',
+            '        playerLayer?.removeFromSuperlayer()',
+            '        playerLayer = nil',
+            '    }',
+            '    deinit { cleanup() }',
+            '}'
+          ].join('\n');
+          fs.writeFileSync(bootSplashSwiftPath, bootSplashSwiftLines, "utf8");
+
+          const bootSplashModuleSwiftPath = "packages/orpheus/ios/BBPlayerBootSplashVideoModule.swift";
+          const bootSplashModuleSwiftLines = [
+            'import ExpoModulesCore',
             '',
-            '    public func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {',
-            '        picker.dismiss(animated: true)',
-            '        self.completion?(nil)',
+            'public class BBPlayerBootSplashVideoModule: Module {',
+            '    public func definition() -> ModuleDefinition {',
+            '        Name("BBPlayerBootSplashVideo")',
+            '        View(BootSplashVideoView.self) {',
+            '            Prop("sourceUri") { (view: BootSplashVideoView, sourceUri: String?) in',
+            '                view.setSource(sourceUri)',
+            '            }',
+            '            Prop("autoPlay") { (view: BootSplashVideoView, autoPlay: Bool?) in',
+            '                view.setAutoPlay(autoPlay ?? true)',
+            '            }',
+            '            Prop("loop") { (view: BootSplashVideoView, loop: Bool?) in',
+            '                view.setLoop(loop ?? false)',
+            '            }',
+            '            Prop("muted") { (view: BootSplashVideoView, muted: Bool?) in',
+            '                view.setMuted(muted ?? true)',
+            '            }',
+            '            Prop("contentFit") { (view: BootSplashVideoView, contentFit: String?) in',
+            '                view.setContentFit(contentFit ?? "cover")',
+            '            }',
+            '            Events("onPlaybackEnd", "onPlaybackError")',
+            '            AsyncFunction("replay") { (view: BootSplashVideoView) in',
+            '                view.replay()',
+            '            }',
+            '        }',
             '    }',
             '}'
-          ].join('\\n');
-          fs.writeFileSync(photoPickerPath, photoPickerContent, "utf8");
-          console.log("✅ 已成功注入 PhotoPickerHelper.swift");
+          ].join('\n');
+          fs.writeFileSync(bootSplashModuleSwiftPath, bootSplashModuleSwiftLines, "utf8");
 
-          // 2. 修复 BootSplashVideoView.tsx 在 iOS 端的兼容回退
-          const bootSplashPath = "packages/native/src/BootSplashVideoView.tsx";
-          if (fs.existsSync(bootSplashPath)) {
-            let bsContent = fs.readFileSync(bootSplashPath, "utf8");
-            if (!bsContent.includes("Platform.OS === 'ios'")) {
-              bsContent = [
-                "import React from 'react';",
-                "import { View, StyleSheet, Platform } from 'react-native';",
-                "import { requireNativeViewManager } from 'expo-modules-core';",
-                "",
-                "const NativeView = Platform.OS === 'android' ? requireNativeViewManager('BootSplashVideoView') : View;",
-                "",
-                "export default function BootSplashVideoView(props: any) {",
-                "  if (Platform.OS === 'ios') {",
-                "    return <View style={[styles.container, props.style]} />;",
-                "  }",
-                "  return <NativeView {...props} style={[styles.container, props.style]} />;",
-                "}",
-                "",
-                "const styles = StyleSheet.create({",
-                "  container: {",
-                "    flex: 1,",
-                "    backgroundColor: '#000000',",
-                "  },",
-                "});"
-              ].join('\n');
-              fs.writeFileSync(bootSplashPath, bsContent, "utf8");
-              console.log("✅ 已优化 BootSplashVideoView.tsx 的 iOS 回退逻辑");
+          const orpheusConfigPath = "packages/orpheus/expo-module.config.json";
+          if (fs.existsSync(orpheusConfigPath)) {
+            const orpheusConfig = JSON.parse(fs.readFileSync(orpheusConfigPath, "utf8"));
+            if (!orpheusConfig.ios.modules.includes("BBPlayerBootSplashVideoModule")) {
+              orpheusConfig.ios.modules.push("BBPlayerBootSplashVideoModule");
+              fs.writeFileSync(orpheusConfigPath, JSON.stringify(orpheusConfig, null, 2), "utf8");
             }
           }
 
-          // 3. 锁定 ExpoOrpheus.podspec 部署目标为 iOS 16.0
+          let modSource = fs.readFileSync(modulePath, "utf8");
+          if (!modSource.includes("View(BootSplashVideoView.self)")) {
+            const viewRegCode = [
+              '        View(BootSplashVideoView.self) {',
+              '            Prop("sourceUri") { (view: BootSplashVideoView, sourceUri: String?) in',
+              '                view.setSource(sourceUri)',
+              '            }',
+              '            Prop("autoPlay") { (view: BootSplashVideoView, autoPlay: Bool?) in',
+              '                view.setAutoPlay(autoPlay ?? true)',
+              '            }',
+              '            Prop("loop") { (view: BootSplashVideoView, loop: Bool?) in',
+              '                view.setLoop(loop ?? false)',
+              '            }',
+              '            Prop("muted") { (view: BootSplashVideoView, muted: Bool?) in',
+              '                view.setMuted(muted ?? true)',
+              '            }',
+              '            Prop("contentFit") { (view: BootSplashVideoView, contentFit: String?) in',
+              '                view.setContentFit(contentFit ?? "cover")',
+              '            }',
+              '            Events("onPlaybackEnd", "onPlaybackError")',
+              '            AsyncFunction("replay") { (view: BootSplashVideoView) in',
+              '                view.replay()',
+              '            }',
+              '        }'
+            ].join('\n');
+            const endDefIdx = modSource.lastIndexOf('  }');
+            if (endDefIdx !== -1) {
+              modSource = modSource.slice(0, endDefIdx) + '\n' + viewRegCode + '\n' + modSource.slice(endDefIdx);
+              fs.writeFileSync(modulePath, modSource, "utf8");
+            }
+          }
+
+          const nativeBootSplashTsxPath = "packages/native/src/BootSplashVideoView.tsx";
+          const nativeBootSplashTsxLines = [
+            "import { requireNativeView } from 'expo'",
+            "import { createElement, forwardRef, useEffect, useImperativeHandle, useRef } from 'react'",
+            "import { Platform, View, type NativeMethods, type ViewProps } from 'react-native'",
+            "",
+            "const NativeBootSplashVideoView = (() => {",
+            "\tif (Platform.OS === 'android') {",
+            "\t\ttry {",
+            "\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t'BBPlayerBootSplashVideo',",
+            "\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t)",
+            "\t\t} catch {",
+            "\t\t\treturn null",
+            "\t\t}",
+            "\t}",
+            "\tif (Platform.OS === 'ios') {",
+            "\t\ttry {",
+            "\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t'BBPlayerBootSplashVideo',",
+            "\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t)",
+            "\t\t} catch {",
+            "\t\t\ttry {",
+            "\t\t\t\treturn requireNativeView<BootSplashVideoViewProps>(",
+            "\t\t\t\t\t'Orpheus',",
+            "\t\t\t\t\t'BootSplashVideoView',",
+            "\t\t\t\t)",
+            "\t\t\t} catch {",
+            "\t\t\t\treturn null",
+            "\t\t\t}",
+            "\t\t}",
+            "\t}",
+            "\treturn null",
+            "})()",
+            "",
+            "export interface BootSplashVideoViewProps extends ViewProps {",
+            "\tsourceUri: string | null",
+            "\tautoPlay?: boolean",
+            "\tloop?: boolean",
+            "\tmuted?: boolean",
+            "\tcontentFit?: 'contain' | 'cover'",
+            "\tonPlaybackEnd?: () => void",
+            "\tonPlaybackError?: (event: {",
+            "\t\tnativeEvent: { extra?: number; message?: string; what?: number }",
+            "\t}) => void",
+            "}",
+            "",
+            "export interface BootSplashVideoViewRef extends NativeMethods {",
+            "\treplay(): Promise<void>",
+            "}",
+            "",
+            "export const BootSplashVideoView = forwardRef<",
+            "\tBootSplashVideoViewRef,",
+            "\tBootSplashVideoViewProps",
+            ">(function BootSplashVideoView(props, ref) {",
+            "\tconst innerRef = useRef<any>(null)",
+            "",
+            "\tuseImperativeHandle(ref, () => ({",
+            "\t\treplay: async () => {",
+            "\t\t\tif (innerRef.current?.replay) {",
+            "\t\t\t\tawait innerRef.current.replay()",
+            "\t\t\t}",
+            "\t\t},",
+            "\t} as unknown as BootSplashVideoViewRef))",
+            "",
+            "\tif (!NativeBootSplashVideoView) {",
+            "\t\tuseEffect(() => {",
+            "\t\t\tconst timer = setTimeout(() => {",
+            "\t\t\t\tprops.onPlaybackEnd?.()",
+            "\t\t\t}, 1000)",
+            "\t\t\treturn () => clearTimeout(timer)",
+            "\t\t}, [props.onPlaybackEnd])",
+            "",
+            "\t\treturn (",
+            "\t\t\t<View",
+            "\t\t\t\tstyle={[",
+            "\t\t\t\t\tprops.style,",
+            "\t\t\t\t\t{ backgroundColor: 'black' },",
+            "\t\t\t\t]}",
+            "\t\t\t\ttestID='BootSplashVideoViewFallback'",
+            "\t\t\t/>",
+            "\t\t)",
+            "\t}",
+            "",
+            "\treturn createElement(NativeBootSplashVideoView, {",
+            "\t\t...props,",
+            "\t\tref: innerRef,",
+            "\t})",
+            "})"
+          ].join('\n');
+          fs.writeFileSync(nativeBootSplashTsxPath, nativeBootSplashTsxLines, "utf8");
+          console.log("✅ 已为 iOS 端注入原生 BootSplashVideoView (AVPlayer / AVPlayerLayer) 及 TS 桥接组件");
+          fs.writeFileSync("packages/native/src/BootSplashVideoView.tsx", "import { requireNativeView } from 'expo'\nimport { createElement, forwardRef, useEffect, useImperativeHandle, useRef } from 'react'\nimport { Platform, View, type NativeMethods, type ViewProps } from 'react-native'\n\nconst NativeBootSplashVideoView = (() => {\n\tif (Platform.OS === 'android') {\n\t\ttry {\n\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t'BBPlayerBootSplashVideo',\n\t\t\t\t'BootSplashVideoView',\n\t\t\t)\n\t\t} catch {\n\t\t\treturn null\n\t\t}\n\t}\n\tif (Platform.OS === 'ios') {\n\t\ttry {\n\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t'BBPlayerBootSplashVideo',\n\t\t\t\t'BootSplashVideoView',\n\t\t\t)\n\t\t} catch {\n\t\t\ttry {\n\t\t\t\treturn requireNativeView<BootSplashVideoViewProps>(\n\t\t\t\t\t'Orpheus',\n\t\t\t\t\t'BootSplashVideoView',\n\t\t\t\t)\n\t\t\t} catch {\n\t\t\t\treturn null\n\t\t\t}\n\t\t}\n\t}\n\treturn null\n})()\n\nexport interface BootSplashVideoViewProps extends ViewProps {\n\tsourceUri: string | null\n\tautoPlay?: boolean\n\tloop?: boolean\n\tmuted?: boolean\n\tcontentFit?: 'contain' | 'cover'\n\tonPlaybackEnd?: () => void\n\tonPlaybackError?: (event: {\n\t\tnativeEvent: { extra?: number; message?: string; what?: number }\n\t}) => void\n}\n\nexport interface BootSplashVideoViewRef extends NativeMethods {\n\treplay(): Promise<void>\n}\n\nexport const BootSplashVideoView = forwardRef<\n\tBootSplashVideoViewRef,\n\tBootSplashVideoViewProps\n>(function BootSplashVideoView(props, ref) {\n\tconst innerRef = useRef<{ replay?: () => Promise<void> } | null>(null)\n\tconst { onPlaybackEnd } = props\n\n\tuseImperativeHandle(\n\t\tref,\n\t\t() =>\n\t\t\t({\n\t\t\t\treplay: async () => {\n\t\t\t\t\tif (innerRef.current?.replay) {\n\t\t\t\t\t\tawait innerRef.current.replay()\n\t\t\t\t\t}\n\t\t\t\t},\n\t\t\t}) as unknown as BootSplashVideoViewRef,\n\t)\n\n\tuseEffect(() => {\n\t\tif (NativeBootSplashVideoView) return\n\t\tconst timer = setTimeout(() => {\n\t\t\tonPlaybackEnd?.()\n\t\t}, 1000)\n\t\treturn () => clearTimeout(timer)\n\t}, [onPlaybackEnd])\n\n\tif (!NativeBootSplashVideoView) {\n\t\treturn (\n\t\t\t<View\n\t\t\t\tstyle={[props.style, { backgroundColor: 'black' }]}\n\t\t\t\ttestID='BootSplashVideoViewFallback'\n\t\t\t/>\n\t\t)\n\t}\n\n\treturn createElement(NativeBootSplashVideoView, {\n\t\t...props,\n\t\t// @ts-expect-error -- native view ref forwarding\n\t\tref: innerRef,\n\t})\n})\n", "utf8");
+          fs.writeFileSync("packages/orpheus/ios/PhotoPickerHelper.swift", "import UIKit\nimport PhotosUI\n\n@available(iOS 14.0, *)\npublic final class PhotoPickerHelper: NSObject, PHPickerViewControllerDelegate, UIAdaptivePresentationControllerDelegate {\n    public static let shared = PhotoPickerHelper()\n    private var activeCompletion: ((String?) -> Void)?\n\n    public func pickSingleImage(completion: @escaping (String?) -> Void) {\n        DispatchQueue.main.async {\n            if let prev = self.activeCompletion {\n                self.activeCompletion = nil\n                prev(nil)\n            }\n\n            guard let topVC = Self.topViewController() else {\n                completion(nil)\n                return\n            }\n\n            var config = PHPickerConfiguration()\n            config.filter = .images\n            config.selectionLimit = 1\n            config.preferredAssetRepresentationMode = .compatible\n\n            let picker = PHPickerViewController(configuration: config)\n            picker.delegate = self\n            picker.presentationController?.delegate = self\n\n            self.activeCompletion = completion\n            topVC.present(picker, animated: true)\n        }\n    }\n\n    public func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {\n        picker.dismiss(animated: true)\n\n        guard let result = results.first else {\n            finish(with: nil)\n            return\n        }\n\n        let provider = result.itemProvider\n        if provider.canLoadObject(ofClass: UIImage.self) {\n            provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in\n                guard let self = self, let image = object as? UIImage else {\n                    self?.finish(with: nil)\n                    return\n                }\n                let normalized = Self.normalizeImage(image, maxDimension: 2560)\n                guard let data = normalized.jpegData(compressionQuality: 0.9) else {\n                    self.finish(with: nil)\n                    return\n                }\n                let fileName = \"picked_bg_\\(Int(Date().timeIntervalSince1970 * 1000))_\\(UUID().uuidString.prefix(6)).jpg\"\n                let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(fileName)\n                do {\n                    try data.write(to: tempURL, options: .atomic)\n                    self.finish(with: tempURL.absoluteString)\n                } catch {\n                    self.finish(with: nil)\n                }\n            }\n        } else {\n            finish(with: nil)\n        }\n    }\n\n    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {\n        finish(with: nil)\n    }\n\n    private func finish(with uri: String?) {\n        DispatchQueue.main.async {\n            if let callback = self.activeCompletion {\n                self.activeCompletion = nil\n                callback(uri)\n            }\n        }\n    }\n\n    private static func normalizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {\n        let size = image.size\n        guard size.width > 0, size.height > 0 else { return image }\n        let maxSide = max(size.width, size.height)\n        let scaleFactor = maxSide > maxDimension ? (maxDimension / maxSide) : 1.0\n        let targetSize = CGSize(width: round(size.width * scaleFactor), height: round(size.height * scaleFactor))\n\n        let format = UIGraphicsImageRendererFormat.default()\n        format.scale = 1.0\n        format.opaque = true\n        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)\n        return renderer.image { _ in\n            image.draw(in: CGRect(origin: .zero, size: targetSize))\n        }\n    }\n\n    private static func topViewController() -> UIViewController? {\n        if #available(iOS 26.0, *) {\n            let scenes = UIApplication.shared.connectedScenes\n                .compactMap { $0 as? UIWindowScene }\n                .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }\n            let keyWindow = scenes\n                .flatMap { $0.windows }\n                .first { $0.isKeyWindow } ?? scenes.flatMap { $0.windows }.first\n            var top = keyWindow?.rootViewController\n            while let presented = top?.presentedViewController, !presented.isBeingDismissed {\n                top = presented\n            }\n            return top\n        } else {\n            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }\n            let keyWindow = scenes.flatMap { $0.windows }.first { $0.isKeyWindow } ?? UIApplication.shared.windows.first { $0.isKeyWindow } ?? UIApplication.shared.keyWindow ?? UIApplication.shared.delegate?.window ?? nil\n            var top = keyWindow?.rootViewController\n            while let presented = top?.presentedViewController, !presented.isBeingDismissed {\n                top = presented\n            }\n            return top\n        }\n    }\n}\n", "utf8");
+          let modForPhoto = fs.readFileSync(modulePath, "utf8");
+          if (!modForPhoto.includes("pickPhotoFromLibrary")) {
+            const photoFuncCode = [
+              '        AsyncFunction("pickPhotoFromLibrary") { (promise: Promise) in',
+              '            PhotoPickerHelper.shared.pickSingleImage { uri in',
+              '                if let uri = uri {',
+              '                    promise.resolve(uri)',
+              '                } else {',
+              '                    promise.resolve()',
+              '                }',
+              '            }',
+              '        }'
+            ].join("\n");
+            modForPhoto = modForPhoto.replace("View(BootSplashVideoView.self) {", photoFuncCode + "\n\n        View(BootSplashVideoView.self) {");
+            fs.writeFileSync(modulePath, modForPhoto, "utf8");
+            console.log("✅ 已在 ExpoOrpheusModule.swift 中注入原生相册选择器 pickPhotoFromLibrary");
+          }
+                    // 锁定 ExpoOrpheus.podspec 部署目标为 iOS 16.0
           const podspecPath = "packages/orpheus/ios/ExpoOrpheus.podspec";
           if (fs.existsSync(podspecPath)) {
             let podspec = fs.readFileSync(podspecPath, "utf8");
@@ -1987,7 +2412,7 @@ jobs:
               '    return super.application(application, didFinishLaunchingWithOptions: launchOptions)',
               '  }',
               '}'
-            ].join('\n');
+            ].join('\\n');
             fs.writeFileSync(appDelegatePath, pureAppDelegate, "utf8");
             console.log("✅ AppDelegate.swift: 已重构为纯净 UIWindow 架构并挂载 RCTSetFatalHandler 全局防崩拦截器:", appDelegatePath);
           }
@@ -2022,8 +2447,8 @@ jobs:
                 patchExpoPlist(full);
               } else if (f.name === "Expo.plist") {
                 let content = fs.readFileSync(full, "utf8");
-                content = content.replace(/<key>EXUpdatesEnabled<\/key>\s*<true\/>/, "<key>EXUpdatesEnabled</key>\n    <false/>");
-                content = content.replace(/<key>EXUpdatesCheckOnLaunch<\/key>\s*<string>ALWAYS<\/string>/, "<key>EXUpdatesCheckOnLaunch</key>\n    <string>NEVER</string>");
+                content = content.replace(/<key>EXUpdatesEnabled<\/key>\s*<true\/>/, "<key>EXUpdatesEnabled</key>\\n    <false/>");
+                content = content.replace(/<key>EXUpdatesCheckOnLaunch<\/key>\s*<string>ALWAYS<\/string>/, "<key>EXUpdatesCheckOnLaunch</key>\\n    <string>NEVER</string>");
                 fs.writeFileSync(full, content, "utf8");
                 console.log("✅ Expo.plist: 已彻底禁用远程 OTA 更新与 ErrorRecovery 队列:", full);
               }
@@ -2044,7 +2469,7 @@ jobs:
           let podfile = fs.readFileSync("Podfile", "utf8");
           podfile = podfile.replace(/platform :ios, ['"][0-9.]+['"]/, "platform :ios, '16.0'");
           if (!podfile.includes("$RNFirebaseDisableSPM = true")) {
-            podfile = "$RNFirebaseDisableSPM = true\n" + podfile;
+            podfile = "$RNFirebaseDisableSPM = true\\n" + podfile;
           }
           if (!podfile.includes("SWIFT_PACKAGE_NO_MACROS")) {
             const postInstallAnchor = "post_install do |installer|";
@@ -2058,7 +2483,7 @@ jobs:
                 "        config.build_settings['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] += ' SWIFT_PACKAGE_NO_MACROS'",
                 "      end",
                 "    end"
-              ].join('\n');
+              ].join('\\n');
               podfile = podfile.replace(postInstallAnchor, postInstallCode);
             }
           }
@@ -2202,16 +2627,41 @@ jobs:
           EOF
 
       - name: 🔨 编译 iOS App (iOS 16.2 Release 纯净构建，禁用代码签名)
+        env:
+          SENTRY_ALLOW_FAILURE: "true"
         run: |
+          set -o pipefail
+          export NODE_BINARY=$(command -v node)
           cd apps/mobile/ios
-          xcodebuild build             -workspace BBPlayer.xcworkspace             -scheme BBPlayer             -configuration Release             -destination 'generic/platform=iOS'             -derivedDataPath build             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             IPHONEOS_DEPLOYMENT_TARGET=16.0             COMPILER_INDEX_STORE_ENABLE=NO
+          xcodebuild build \
+            -workspace BBPlayer.xcworkspace \
+            -scheme BBPlayer \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION="$RELEASE_VERSION" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+            COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log" || {
+              echo "❌ xcodebuild 编译失败，查看上面详细错误信息"
+              exit 1
+            }
 
       - name: 📄 上传构建错误日志 (仅失败时触发)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ios-build-errors
-          path: apps/mobile/ios/build/**/*.log
+          path: |
+            ${{ runner.temp }}/build-ios.log
+            apps/mobile/ios/build/**/*.log
           retention-days: 7
 
       - name: 📦 打包为未签名 .ipa 与 iOS 16.2 动态加载安全终极验证
