@@ -2660,7 +2660,7 @@ jobs:
 
           const ws = process.env.GITHUB_WORKSPACE || path.resolve("../../..");
 
-          const targets = [
+          const targets = process.env.BB_COMPAT_16_2 !== "1" ? [] : [
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
@@ -2779,7 +2779,7 @@ jobs:
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
-          const targets = [
+          const targets = process.env.BB_COMPAT_16_2 !== "1" ? [] : [
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
@@ -3141,7 +3141,7 @@ jobs:
           const fs = require("fs");
           const path = require("path");
 
-          const targets = [
+          const targets = process.env.BB_COMPAT_16_2 !== "1" ? [] : [
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvg", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI19UIHostingControllerC15safeAreaRegionsAA04SafefG0Vvs", good: "_$s7SwiftUI19UIHostingControllerC8rootViewACyxGx_tcfc" },
             { bad: "_$s7SwiftUI15SafeAreaRegionsV3allACvgZ", good: "_$s7SwiftUI9EmptyViewVN" },
@@ -3202,7 +3202,7 @@ jobs:
             }
           }
           verify("Payload");
-          if (badFound.length > 0) {
+          if (badFound.length > 0 && process.env.BB_COMPAT_16_2 === "1") {
             console.error("❌ 致命断言失败：以下产物中依然存在 safeAreaRegions 强符号！", badFound);
             process.exit(1);
           }
