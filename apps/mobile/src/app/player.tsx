@@ -5,6 +5,7 @@ import { Computed, useObserveEffect } from '@legendapp/state/react'
 import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
 import { useImage } from 'expo-image'
 import { useObserve } from 'expo-observe'
+import * as ScreenOrientation from 'expo-screen-orientation'
 import { router, useIsFocused } from 'expo-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -86,6 +87,17 @@ export default function PlayerPage() {
 	useEffect(() => {
 		markInteractive()
 	}, [markInteractive])
+
+	// 只有播放页允许横屏，离开时锁回竖屏
+	useEffect(() => {
+		if (Platform.OS !== 'ios') return
+		void ScreenOrientation.unlockAsync().catch(() => void 0)
+		return () => {
+			void ScreenOrientation.lockAsync(
+				ScreenOrientation.OrientationLock.PORTRAIT_UP,
+			).catch(() => void 0)
+		}
+	}, [])
 	const currentTrackCover = resolveBilibiliImageUrl(
 		currentTrack
 			? resolveTrackCover(currentTrack.uniqueKey, currentTrack.coverUrl)

@@ -10,6 +10,12 @@ import { playerSideEffects } from './src/lib/player/PlayerSideEffects'
 
 playerSideEffects.initialize()
 
+import * as ScreenOrientation from 'expo-screen-orientation'
+
+void ScreenOrientation.lockAsync(
+	ScreenOrientation.OrientationLock.PORTRAIT_UP,
+).catch(() => undefined)
+
 import { initNowPlayingLiveActivity } from './src/lib/player/nowPlayingLiveActivity'
 
 initNowPlayingLiveActivity()

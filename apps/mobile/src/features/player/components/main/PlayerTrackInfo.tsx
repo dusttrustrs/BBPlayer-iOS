@@ -39,10 +39,16 @@ export function TrackInfo({
 	onArtistPress,
 	onPressCover,
 	coverRef,
+	part = 'all',
+	coverMaxSize,
 }: {
 	onArtistPress: () => void
 	onPressCover: () => void
 	coverRef: ImageRef | null
+	/** 横屏时封面和信息分到两列，分别渲染 */
+	part?: 'all' | 'cover' | 'info'
+	/** 横屏时封面边长上限 */
+	coverMaxSize?: number
 }) {
 	const { colors } = useTheme()
 
@@ -100,16 +106,23 @@ export function TrackInfo({
 				position: 'relative',
 			}}
 		>
+			{part !== 'info' && (
 			<Computed>
 				{() => {
 					const podcast = playbackContextStore$.context.mode.get() === 'podcast'
-					const coverSize = podcast ? COVER_SIZE_RECT : COVER_SIZE_CIRCLE
+					const baseSize = podcast ? COVER_SIZE_RECT : COVER_SIZE_CIRCLE
+					const coverSize = coverMaxSize ? coverMaxSize : baseSize
 					const coverBorderRadius = podcast
 						? COVER_SIZE_RECT * SQUIRCLE_RADIUS_RATIO
 						: coverSize / 2
 					return (
 						<Pressable
-							style={styles.coverContainer}
+							style={[
+								styles.coverContainer,
+								coverMaxSize
+									? { height: coverMaxSize + 16, paddingHorizontal: 0 }
+									: null,
+							]}
 							onPress={podcast ? undefined : onPressCover}
 							disabled={podcast}
 						>
@@ -181,8 +194,17 @@ export function TrackInfo({
 					)
 				}}
 			</Computed>
+			)}
 
-			<View style={styles.trackInfoContainer}>
+			{part !== 'cover' && (
+			<View
+				style={[
+					styles.trackInfoContainer,
+					coverMaxSize !== undefined || part === 'info'
+						? { paddingHorizontal: 0 }
+						: null,
+				]}
+			>
 				<View style={styles.trackTitleContainer}>
 					<View style={styles.trackTitleTextContainer}>
 						<TouchableRipple
@@ -225,6 +247,7 @@ export function TrackInfo({
 					)}
 				</View>
 			</View>
+			)}
 		</View>
 	)
 }

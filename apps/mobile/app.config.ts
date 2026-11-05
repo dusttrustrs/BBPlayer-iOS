@@ -101,7 +101,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 		name: getAppName(),
 		slug: 'bbplayer',
 		version: version,
-		orientation: 'portrait',
+		// 默认允许旋转；除播放页外的页面在运行时锁回竖屏（见 src/lib/player/orientation.ts）
+		orientation: 'default',
 		icon: './assets/images/icon.png',
 		scheme: 'bbplayer',
 		userInterfaceStyle: 'automatic',
@@ -148,6 +149,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 		},
 		plugins: [
 			'expo-widgets',
+			'expo-screen-orientation',
 			'./expo-plugins/withProductionDebugSigning',
 			'./expo-plugins/withKotlinSerialization',
 			// './expo-plugins/withAndroidPlugin',
