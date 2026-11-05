@@ -314,6 +314,162 @@ jobs:
           PlayerMainTab.displayName = 'PlayerMainTab'
           export default PlayerMainTab
           EOF_LANDSCAPE_TSX
+          cat > /tmp/LandscapePlayer.tsx << 'EOF_LANDSCAPE_PLAYER'
+          import { Show } from '@legendapp/state/react'
+          import type { ImageRef } from 'expo-image'
+          import { useRouter } from 'expo-router'
+          import { useEffect } from 'react'
+          import { StyleSheet, useWindowDimensions, View } from 'react-native'
+          import PagerView from 'react-native-pager-view'
+          import Animated, {
+          	Easing,
+          	useAnimatedStyle,
+          	useSharedValue,
+          	withTiming,
+          } from 'react-native-reanimated'
+          import { useSafeAreaInsets } from 'react-native-safe-area-context'
+
+          import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
+          import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
+          import { PlayerSlider } from '@/features/player/components/main/PlayerSlider'
+          import { TrackInfo } from '@/features/player/components/main/PlayerTrackInfo'
+          import useCurrentTrack from '@/hooks/player/useCurrentTrack'
+          import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
+          import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
+          import * as Haptics from '@/utils/haptics'
+
+          const AnimatedPagerView = Animated.createAnimatedComponent(PagerView)
+
+          /**
+           * 横屏播放器：左侧封面常驻；右侧是一个小 PagerView（播放控制 / 歌词）。
+           * 左滑进入歌词时，歌词页从右侧被「推」进来，封面保持不动。
+           */
+          export function LandscapePlayer({
+          	pagerRef,
+          	index,
+          	setIndex,
+          	jumpTo,
+          	imageRef,
+          	onPageScroll,
+          }: {
+          	pagerRef: React.RefObject<PagerView | null>
+          	index: number
+          	setIndex: (i: number) => void
+          	jumpTo: (key: string) => void
+          	imageRef: ImageRef | null
+          	onPageScroll: unknown
+          }) {
+          	const router = useRouter()
+          	const insets = useSafeAreaInsets()
+          	const currentTrack = useCurrentTrack()
+          	const { width, height } = useWindowDimensions()
+
+          	// 进入横屏的小段入场动画；不降低透明度，动画被打断也不会留下半透明的界面
+          	const p = useSharedValue(1)
+          	useEffect(() => {
+          		p.set(0)
+          		p.set(withTiming(1, { duration: 480, easing: Easing.bezier(0.2, 0.8, 0.2, 1) }))
+          	}, [p])
+          	const coverStyle = useAnimatedStyle(() => ({
+          		transform: [
+          			{ translateX: -width * 0.12 * (1 - p.value) },
+          			{ scale: 1 + 0.08 * (1 - p.value) },
+          		],
+          	}))
+          	const rightStyle = useAnimatedStyle(() => ({
+          		transform: [{ translateX: 60 * (1 - p.value) }],
+          	}))
+
+          	if (!currentTrack) return null
+          	const padL = Math.max(insets.left, 24)
+          	const padR = Math.max(insets.right, 24)
+          	// 封面缩小，给旋转光环留出空间
+          	const coverSize = Math.min(220, width * 0.34, height - 56 - 64)
+          	const isPodcast = playbackContextStore$.context.mode.peek() === 'podcast'
+
+          	return (
+          		<Show if={playbackContextStore$.ready}>
+          			<View style={[styles.row, { paddingLeft: padL, paddingRight: padR }]}>
+          				<Animated.View style={[styles.left, { width: width * 0.4 }, coverStyle]}>
+          					<TrackInfo
+          						part='cover'
+          						coverMaxSize={coverSize}
+          						onArtistPress={() => void 0}
+          						onPressCover={() => {
+          							void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+          							jumpTo(index === 1 ? 'main' : 'lyrics')
+          						}}
+          						coverRef={imageRef}
+          					/>
+          				</Animated.View>
+          				<Animated.View style={[styles.right, rightStyle]}>
+          					<AnimatedPagerView
+          						key={isPodcast ? 'podcast' : 'music'}
+          						ref={pagerRef}
+          						style={styles.flex}
+          						initialPage={index}
+          						scrollEnabled={!isPodcast}
+          						// eslint-disable-next-line @typescript-eslint/no-explicit-any
+          						onPageScroll={onPageScroll as any}
+          						onPageSelected={(e) => setIndex(e.nativeEvent.position)}
+          					>
+          						{[
+          							<View
+          								key='main'
+          								style={styles.page}
+          							>
+          								<TrackInfo
+          									part='info'
+          									onArtistPress={() =>
+          										currentTrack.artist?.remoteId
+          											? router.navigate({
+          													pathname: '/playlist/remote/uploader/[mid]',
+          													params: { mid: currentTrack.artist?.remoteId },
+          												})
+          											: void 0
+          									}
+          									onPressCover={() => void 0}
+          									coverRef={imageRef}
+          								/>
+          								<View style={styles.gap}>
+          									<PlayerSlider />
+          								</View>
+          								<PlayerControls
+          									onOpenQueue={() => {
+          										void usePlayerQueueSheetStore.getState().open()
+          									}}
+          								/>
+          							</View>,
+          							...(isPodcast
+          								? []
+          								: [
+          										<View
+          											key='lyrics'
+          											style={styles.flex}
+          										>
+          											<Lyrics
+          												currentIndex={index}
+          												onPressBackground={() => jumpTo('main')}
+          											/>
+          										</View>,
+          									]),
+          						]}
+          					</AnimatedPagerView>
+          				</Animated.View>
+          			</View>
+          		</Show>
+          	)
+          }
+
+          const styles = StyleSheet.create({
+          	flex: { flex: 1 },
+          	row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 16 },
+          	left: { alignItems: 'center', justifyContent: 'center' },
+          	right: { flex: 1, alignSelf: 'stretch' },
+          	page: { flex: 1, justifyContent: 'center' },
+          	gap: { marginTop: 16, marginBottom: 20 },
+          })
+          EOF_LANDSCAPE_PLAYER
           node << 'EOF'
           const fs = require("fs");
           const rw = (p, fn) => { if (!fs.existsSync(p)) { console.log("⚠️ 未找到 " + p); return; } const a = fs.readFileSync(p, "utf8"); const b = fn(a); if (b !== a) fs.writeFileSync(p, b, "utf8"); return b !== a; };
@@ -338,6 +494,17 @@ jobs:
             t = rep(t, "\t\tmarkInteractive()\n\t}, [markInteractive])\n", "\t\tmarkInteractive()\n\t}, [markInteractive])\n\n\t// 只有播放页允许横屏，离开时锁回竖屏\n\tuseEffect(() => {\n\t\tif (Platform.OS !== 'ios') return\n\t\tvoid ScreenOrientation.unlockAsync().catch(() => void 0)\n\t\treturn () => {\n\t\t\tvoid ScreenOrientation.lockAsync(\n\t\t\t\tScreenOrientation.OrientationLock.PORTRAIT_UP,\n\t\t\t).catch(() => void 0)\n\t\t}\n\t}, [])\n", "player effect");
             return t;
           });
+          rw("apps/mobile/src/app/player.tsx", (t) => {
+            if (t.includes("<LandscapePlayer")) return t;
+            t = rep(t, "import Lyrics from", "import { LandscapePlayer } from '@/features/player/components/main/LandscapePlayer'\nimport Lyrics from", "LP import");
+            const open = "\t\t\t\t\t\t<Computed>\n\t\t\t\t\t\t\t<AnimatedPagerView";
+            const close = "</AnimatedPagerView>\n\t\t\t\t\t\t</Computed>\n";
+            if (!t.includes(open) || !t.includes(close)) { console.log("⚠️ 横屏补丁锚点未命中: player pager"); return t; }
+            t = t.replace(open, "\t\t\t\t\t\t{width > height ? (\n\t\t\t\t\t\t\t<LandscapePlayer\n\t\t\t\t\t\t\t\tpagerRef={pagerRef}\n\t\t\t\t\t\t\t\tindex={index}\n\t\t\t\t\t\t\t\tsetIndex={setIndex}\n\t\t\t\t\t\t\t\tjumpTo={jumpTo}\n\t\t\t\t\t\t\t\timageRef={coverRef}\n\t\t\t\t\t\t\t\tonPageScroll={pageScrollHandler}\n\t\t\t\t\t\t\t/>\n\t\t\t\t\t\t) : (\n" + open);
+            t = t.replace(close, close + "\t\t\t\t\t\t)}\n");
+            return t;
+          });
+          if (!fs.existsSync("apps/mobile/src/features/player/components/main/LandscapePlayer.tsx")) fs.copyFileSync("/tmp/LandscapePlayer.tsx", "apps/mobile/src/features/player/components/main/LandscapePlayer.tsx");
           // 5. PlayerTrackInfo.tsx：支持 part / coverMaxSize
           rw("apps/mobile/src/features/player/components/main/PlayerTrackInfo.tsx", (t) => {
             if (t.includes("coverMaxSize")) return t;
