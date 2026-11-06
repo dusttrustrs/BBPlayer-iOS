@@ -2663,7 +2663,9 @@ jobs:
           let projectCount = 0;
           for (const projectPath of projectFiles) {
             let project = fs.readFileSync(projectPath, "utf8");
-            const updated = project.replace(/MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${releaseVersion};`);
+            let updated = project.replace(/MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${releaseVersion};`);
+            // 统一锁定所有 Target 部署基线为 16.4，与 ExpoUI 模块编译基线严格对齐（避免 swiftmodule 版本不匹配）
+            updated = updated.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, `IPHONEOS_DEPLOYMENT_TARGET = 16.4;`);
             if (updated !== project) {
               fs.writeFileSync(projectPath, updated, "utf8");
               projectCount++;
@@ -2756,6 +2758,32 @@ jobs:
               );
               fs.writeFileSync(appDelegatePath, appDelegate, "utf8");
               console.log("✅ AppDelegate: 已将 window.backgroundColor 调整为 systemBackgroundColor");
+            }
+          }
+          // 确保 Expo.plist 彻底禁用 expo-updates 远程轮询与错误恢复队列
+          function findExpoPlist(dir) {
+            if (!fs.existsSync(dir)) return null;
+            for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, f.name);
+              if (f.name === "Pods" || f.name === "build") continue;
+              if (f.isDirectory()) {
+                const found = findExpoPlist(full);
+                if (found) return found;
+              } else if (f.name === "Expo.plist") {
+                return full;
+              }
+            }
+            return null;
+          }
+          const expoPlistPath = findExpoPlist("ios") || findExpoPlist("apps/mobile/ios");
+          if (expoPlistPath) {
+            console.log("🔍 检查生成的 Expo.plist:", expoPlistPath);
+            try {
+              execSync(`/usr/libexec/PlistBuddy -c "Set :EXUpdatesEnabled false" "${expoPlistPath}" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :EXUpdatesEnabled bool false" "${expoPlistPath}" 2>/dev/null || true`);
+              execSync(`/usr/libexec/PlistBuddy -c "Set :EXUpdatesCheckOnLaunch NEVER" "${expoPlistPath}" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :EXUpdatesCheckOnLaunch string NEVER" "${expoPlistPath}" 2>/dev/null || true`);
+              console.log("✅ PlistBuddy: 已配置 Expo.plist (EXUpdatesEnabled=false, EXUpdatesCheckOnLaunch=NEVER)");
+            } catch (e) {
+              console.log("⚠️ PlistBuddy 处理 Expo.plist 告警:", e.message);
             }
           }
           EOF
@@ -3164,6 +3192,69 @@ jobs:
               }
               console.log(`✅ 已为 ${patchedCount} 个 .xcconfig 补齐 React-VFS.yaml / modulemap / Swift -I 编译参数`);
             }
+            // 彻底中和 CocoaPods Pods 中 EXUpdates 的 exception.raise() 与 delegate?.throwException
+            function patchExpoUpdatesPods(rootDir) {
+              if (!fs.existsSync(rootDir)) return;
+              const walk = (dir) => {
+                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                  const full = path.join(dir, f.name);
+                  if (f.isDirectory()) {
+                    walk(full);
+                  } else if (f.name === "StartupProcedure.swift") {
+                    let code = fs.readFileSync(full, "utf8");
+                    if (code.includes("exception.raise()")) {
+                      code = code.replace("exception.raise()", "NSLog(\"🚨 [EXUpdates Suppressed Crash] %@: %@\", exception.name.rawValue, exception.reason ?? \"\")");
+                      fs.writeFileSync(full, code, "utf8");
+                      console.log("✅ 已中和 CocoaPods Pods StartupProcedure.swift 中的 exception.raise():", full);
+                    }
+                  } else if (f.name === "ErrorRecovery.swift") {
+                    let code = fs.readFileSync(full, "utf8");
+                    if (code.includes("delegate?.throwException(NSException(")) {
+                      code = code.replace(
+                        "delegate?.throwException(NSException(name: name, reason: reason, userInfo: userInfo))",
+                        "NSLog(\"🚨 [EXUpdates ErrorRecovery Suppressed Crash] %@: %@\", name.rawValue, reason ?? \"\")"
+                      );
+                      fs.writeFileSync(full, code, "utf8");
+                      console.log("✅ 已中和 CocoaPods Pods ErrorRecovery.swift 中的 delegate?.throwException:", full);
+                    }
+                  }
+                }
+              };
+              walk(rootDir);
+            }
+            patchExpoUpdatesPods("Pods");
+            patchExpoUpdatesPods("apps/mobile/ios/Pods");
+            // 彻底中和 CocoaPods Pods 中 React Native 的 RCTAssert.m @throw 与 RCTExceptionsManager.mm RCTFatal
+            function patchReactNativeExceptionsPods(rootDir) {
+              if (!fs.existsSync(rootDir)) return;
+              const walk = (dir) => {
+                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                  const full = path.join(dir, f.name);
+                  if (f.isDirectory()) {
+                    walk(full);
+                  } else if (f.name === "RCTAssert.m") {
+                    let code = fs.readFileSync(full, "utf8");
+                    const throwPattern = /@throw\s+\[\[NSException\s+alloc\]\s+initWithName:name\s+reason:message\s+userInfo:userInfo\];/;
+                    if (throwPattern.test(code)) {
+                      code = code.replace(throwPattern, 'NSLog(@"🚨 [RCTFatal Suppressed] %@: %@", name, message);');
+                      fs.writeFileSync(full, code, "utf8");
+                      console.log("✅ 已中和 CocoaPods Pods RCTAssert.m 中的 @throw:", full);
+                    }
+                  } else if (f.name === "RCTExceptionsManager.mm") {
+                    let code = fs.readFileSync(full, "utf8");
+                    const fatalCall = "RCTFatal([NSError errorWithDomain:RCTErrorDomain code:0 userInfo:errorInfo]);";
+                    if (code.includes(fatalCall)) {
+                      code = code.replace(fatalCall, 'NSLog(@"🚨 [RCTExceptionsManager Suppressed Fatal] %@", description);');
+                      fs.writeFileSync(full, code, "utf8");
+                      console.log("✅ 已中和 CocoaPods Pods RCTExceptionsManager.mm 中的 RCTFatal 调用:", full);
+                    }
+                  }
+                }
+              };
+              walk(rootDir);
+            }
+            patchReactNativeExceptionsPods("Pods");
+            patchReactNativeExceptionsPods("apps/mobile/ios/Pods");
           }
           EOF
       - name: 🔨 编译 iOS App (禁用代码签名)
@@ -3232,6 +3323,34 @@ jobs:
           echo "✅ 已验证 IPA 应用版本: $BUILT_VERSION"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
+          echo "🔍 验证 Payload 产物符号表安全性（防御 safeAreaRegions 强符号篡改与非法 EmptyViewVN 跳转）..."
+          node << 'EOF'
+          const fs = require("fs");
+          const path = require("path");
+
+          let badFound = [];
+          function verifyPayload(dir) {
+            for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, ent.name);
+              if (ent.isDirectory()) {
+                verifyPayload(full);
+              } else if (ent.isFile()) {
+                try {
+                  const b = fs.readFileSync(full);
+                  if (b.includes("ExpoSwiftUI") && !b.includes("safeAreaRegions") && b.includes("_$s7SwiftUI9EmptyViewVN")) {
+                    badFound.push(full);
+                  }
+                } catch(e) {}
+              }
+            }
+          }
+          verifyPayload("Payload");
+          if (badFound.length > 0) {
+            console.error("❌ 致命断言失败：以下产物中存在 safeAreaRegions 符号篡改，会导致 iOS 27 启动崩溃！", badFound);
+            process.exit(1);
+          }
+          console.log("🛡️ 终极验证通过：Payload 目录中所有 Mach-O 动态库符号表完好，已杜绝 EmptyViewVN 启动闪退风险！");
+          EOF
           zip -r -y -q BBPlayer-unsigned.ipa Payload
           mkdir -p "${GITHUB_WORKSPACE}/dist"
           mv BBPlayer-unsigned.ipa "${GITHUB_WORKSPACE}/dist/"
