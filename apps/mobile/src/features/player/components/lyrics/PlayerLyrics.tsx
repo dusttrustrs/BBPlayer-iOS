@@ -46,11 +46,6 @@ const Lyrics = memo(function Lyrics({
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
 	const colors = useTheme().colors
-	const isFluidBackground = useAppStore(
-		(state) =>
-			!state.settings.pureWhiteBackground &&
-			state.settings.playerBackgroundStyle === 'fluid',
-	)
 	const scrollViewRef = useRef<Animated.ScrollView>(null)
 	const itemLayoutsRef = useRef<{ [index: number]: number }>({})
 
@@ -373,19 +368,16 @@ const Lyrics = memo(function Lyrics({
 							<LinearGradient
 								style={[
 									styles.gradient,
-									!isLandscape &&
-										isFluidBackground && {
-											height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
-										},
+									!isLandscape && {
+										height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
+									},
 								]}
 								start={{ x: 0, y: 0 }}
 								end={{ x: 0, y: 1 }}
 								colors={[colors.background, 'transparent']}
 								locations={[
 									0,
-									!isLandscape && isFluidBackground
-										? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT
-										: 1,
+									!isLandscape ? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT : 1,
 								]}
 							/>
 						</View>

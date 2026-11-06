@@ -1,5 +1,4 @@
 import { Icon as ExpoIcon } from '@expo/ui'
-import { LinearGradient } from 'expo-linear-gradient'
 import { memo } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Touchable } from 'react-native-gesture-handler'
@@ -9,7 +8,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MenuView } from '@/components/common/FunctionalMenu'
 import { MainPlaybackControls } from '@/features/player/components/controls/PlayerControlContent'
 import { PlayerSlider } from '@/features/player/components/main/PlayerSlider'
-import useAppStore from '@/hooks/stores/useAppStore'
 import { type MenuBuilder, useMenuActions } from '@/hooks/ui/useMenuActions'
 
 const ALPHABETICAL_ICON = ExpoIcon.select({
@@ -56,12 +54,6 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
 
-	const isFluidBackground = useAppStore(
-		(state) =>
-			!state.settings.pureWhiteBackground &&
-			state.settings.playerBackgroundStyle === 'fluid',
-	)
-
 	const menuActions = useMenuActions(addLyricsMenuItems)
 
 	function addLyricsMenuItems(menu: MenuBuilder) {
@@ -104,18 +96,6 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 			]}
 			pointerEvents='box-none'
 		>
-			{/* 防重叠渐变底色，确保歌词在控件后方优雅渐隐，不干扰进度条与按钮 */}
-			<LinearGradient
-				style={StyleSheet.absoluteFill}
-				start={{ x: 0, y: 0 }}
-				end={{ x: 0, y: 0.35 }}
-				colors={[
-					'rgba(0, 0, 0, 0)',
-					isFluidBackground ? 'rgba(16, 16, 18, 0.92)' : colors.background,
-				]}
-				pointerEvents='none'
-			/>
-
 			<View style={[styles.playerControls, { paddingBottom }]}>
 				{/* 功能按钮，位于 slider 上方右侧 */}
 				<View style={styles.actionMenuRow}>

@@ -1,8 +1,10 @@
 import { useIsPlaying } from '@bbplayer/orpheus'
+import { Canvas, Path, Skia } from '@shopify/react-native-skia'
 import Color from 'color'
 import { WavySlider } from 'expo-wavy-slider'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+	Image,
 	PanResponder,
 	Platform,
 	StyleSheet,
@@ -13,11 +15,14 @@ import {
 import AnimateableText from 'react-native-animateable-text'
 import { useTheme } from 'react-native-paper'
 import Animated, {
+	Easing,
+	cancelAnimation,
 	useAnimatedProps,
 	useAnimatedReaction,
 	useAnimatedStyle,
 	useDerivedValue,
 	useSharedValue,
+	withRepeat,
 	withTiming,
 	type SharedValue,
 } from 'react-native-reanimated'
@@ -118,6 +123,17 @@ function IOSSlider({
 	enabled,
 	progress,
 	colors,
+	waveHeight,
+	waveThickness,
+	trackThickness,
+	isPlaying,
+	chapterMarkers = [],
+	thumbImageUri,
+	thumbImageDragLeftUri: _thumbImageDragLeftUri,
+	thumbImageDragRightUri: _thumbImageDragRightUri,
+	thumbImageSize = 32,
+	thumbImageOffsetX = 0,
+	thumbImageOffsetY = 0,
 	onValueChange,
 	onValueChangeFinished,
 	onDragStateChange,
@@ -129,17 +145,51 @@ function IOSSlider({
 		activeTrackColor: string
 		inactiveTrackColor: string
 		thumbColor: string
+		activeTickColor?: string
+		inactiveTickColor?: string
 	}
+	waveHeight: SharedValue<number>
+	waveThickness: SharedValue<number>
+	trackThickness: SharedValue<number>
+	isPlaying: boolean
+	chapterMarkers?: number[]
+	thumbImageUri?: string
+	thumbImageDragLeftUri?: string
+	thumbImageDragRightUri?: string
+	thumbImageSize?: number
+	thumbImageOffsetX?: number
+	thumbImageOffsetY?: number
 	onValueChange: (value: number) => void
 	onValueChangeFinished: (value: number) => void
 	onDragStateChange: (dragging: boolean) => void
 	style?: StyleProp<ViewStyle>
 }) {
 	const [trackWidth, setTrackWidth] = useState(0)
+	const widthShared = useSharedValue(0)
 	const isDraggingRef = useRef(false)
 	const trackPageXRef = useRef(0)
 	const trackRef = useRef<View>(null)
 	const isDraggingShared = useSharedValue(false)
+	const dragDeltaShared = useSharedValue(0)
+	const phase = useSharedValue(0)
+
+	useEffect(() => {
+		if (isPlaying) {
+			phase.set(0)
+			phase.set(
+				withRepeat(
+					withTiming(30, {
+						duration: 2000,
+						easing: Easing.linear,
+					}),
+					-1,
+					false,
+				),
+			)
+		} else {
+			cancelAnimation(phase)
+		}
+	}, [isPlaying, phase])
 
 	const panResponder = useMemo(
 		() =>
@@ -163,11 +213,13 @@ function IOSSlider({
 					if (!isDraggingRef.current || trackWidth <= 0) return
 					const currentX = evt.nativeEvent.pageX - trackPageXRef.current
 					const fraction = Math.max(0, Math.min(1, currentX / trackWidth))
+					dragDeltaShared.set(fraction - (progress.value || 0))
 					onValueChange(fraction)
 				},
 				onPanResponderRelease: (evt) => {
 					isDraggingRef.current = false
 					isDraggingShared.set(false)
+					dragDeltaShared.set(0)
 					if (trackWidth > 0) {
 						const currentX = evt.nativeEvent.pageX - trackPageXRef.current
 						const fraction = Math.max(0, Math.min(1, currentX / trackWidth))
@@ -178,6 +230,7 @@ function IOSSlider({
 				onPanResponderTerminate: () => {
 					isDraggingRef.current = false
 					isDraggingShared.set(false)
+					dragDeltaShared.set(0)
 					onDragStateChange(false)
 				},
 			}),
@@ -188,14 +241,84 @@ function IOSSlider({
 			onValueChange,
 			onValueChangeFinished,
 			isDraggingShared,
+			dragDeltaShared,
+			progress,
 		],
 	)
 
-	const activeTrackAnimatedStyle = useAnimatedStyle(() => {
+	const activeWavePath = useDerivedValue(() => {
+		const w = widthShared.value
+		const path = Skia.Path.Make()
+		if (w <= 0) return path
+
 		const p = Math.max(0, Math.min(1, progress.value || 0))
-		return {
-			width: `${p * 100}%`,
+		const thumbX = p * w
+		const centerY = 14
+		const h = waveHeight.value
+		const ph = phase.value
+
+		if (thumbX <= 0) return path
+
+		path.moveTo(0, centerY)
+
+		// 振幅极小或游标极靠起点时平滑收缩为直线
+		if (h < 0.2 || thumbX < 4) {
+			path.lineTo(thumbX, centerY)
+			return path
 		}
+
+		// Google Material 3 经典波浪正弦曲线，波长为 30px，相位朝游标方向行进
+		const step = 2
+		const transitionZone = 16
+		for (let x = step; x < thumbX; x += step) {
+			const leadIn = Math.min(1, x / transitionZone)
+			const leadOut = Math.min(1, (thumbX - x) / transitionZone)
+			const envelope = leadIn * leadOut
+			const y =
+				centerY +
+				h * envelope * Math.sin((2 * Math.PI * (x - ph)) / 30)
+			path.lineTo(x, y)
+		}
+		path.lineTo(thumbX, centerY)
+
+		return path
+	})
+
+	const inactiveTrackPath = useDerivedValue(() => {
+		const w = widthShared.value
+		const path = Skia.Path.Make()
+		if (w <= 0) return path
+
+		const p = Math.max(0, Math.min(1, progress.value || 0))
+		const thumbX = p * w
+		const centerY = 14
+
+		if (thumbX < w) {
+			path.moveTo(thumbX, centerY)
+			path.lineTo(w, centerY)
+		}
+
+		return path
+	})
+
+	const ticksPath = useDerivedValue(() => {
+		const w = widthShared.value
+		const path = Skia.Path.Make()
+		if (w <= 0 || !chapterMarkers || chapterMarkers.length === 0) return path
+
+		const centerY = 14
+		const tickH = isDraggingShared.value ? 6 : 3
+
+		for (let i = 0; i < chapterMarkers.length; i++) {
+			const fraction = chapterMarkers[i]
+			if (fraction > 0 && fraction < 1) {
+				const x = fraction * w
+				path.moveTo(x, centerY - tickH)
+				path.lineTo(x, centerY + tickH)
+			}
+		}
+
+		return path
 	})
 
 	const thumbAnimatedStyle = useAnimatedStyle(() => {
@@ -209,39 +332,83 @@ function IOSSlider({
 		}
 	})
 
+	const activeThumbUri = useMemo(() => {
+		return thumbImageUri
+	}, [thumbImageUri])
+
 	return (
 		<View
 			ref={trackRef}
 			style={[styles.iosSliderContainer, style]}
 			onLayout={(e) => {
 				const w = e.nativeEvent.layout.width
-				if (w > 0) setTrackWidth(w)
+				if (w > 0) {
+					setTrackWidth(w)
+					widthShared.set(w)
+				}
 				trackRef.current?.measure((_x, _y, _width, _height, pageX) => {
 					if (pageX) trackPageXRef.current = pageX
 				})
 			}}
 			{...panResponder.panHandlers}
 		>
-			<View
-				style={[
-					styles.iosInactiveTrack,
-					{ backgroundColor: colors.inactiveTrackColor },
-				]}
-			/>
+			<Canvas
+				style={styles.skiaCanvas}
+				pointerEvents='none'
+			>
+				<Path
+					path={inactiveTrackPath}
+					color={colors.inactiveTrackColor}
+					style='stroke'
+					strokeWidth={trackThickness}
+					strokeCap='round'
+					strokeJoin='round'
+				/>
+				<Path
+					path={activeWavePath}
+					color={colors.activeTrackColor}
+					style='stroke'
+					strokeWidth={waveThickness}
+					strokeCap='round'
+					strokeJoin='round'
+				/>
+				{chapterMarkers.length > 0 && (
+					<Path
+						path={ticksPath}
+						color={colors.activeTickColor || colors.activeTrackColor}
+						style='stroke'
+						strokeWidth={2}
+						strokeCap='round'
+					/>
+				)}
+			</Canvas>
+
 			<Animated.View
-				style={[
-					styles.iosActiveTrack,
-					{ backgroundColor: colors.activeTrackColor },
-					activeTrackAnimatedStyle,
-				]}
-			/>
-			<Animated.View
-				style={[
-					styles.iosThumb,
-					{ backgroundColor: colors.thumbColor },
-					thumbAnimatedStyle,
-				]}
-			/>
+				style={[styles.iosThumbWrapper, thumbAnimatedStyle]}
+				pointerEvents='none'
+			>
+				{activeThumbUri ? (
+					<Image
+						source={{ uri: activeThumbUri }}
+						style={{
+							width: thumbImageSize,
+							height: thumbImageSize,
+							transform: [
+								{ translateX: thumbImageOffsetX },
+								{ translateY: thumbImageOffsetY },
+							],
+						}}
+						resizeMode='contain'
+					/>
+				) : (
+					<View
+						style={[
+							styles.iosThumb,
+							{ backgroundColor: colors.thumbColor },
+						]}
+					/>
+				)}
+			</Animated.View>
 		</View>
 	)
 }
@@ -542,6 +709,21 @@ export function PlayerSlider({
 						enabled={canSeek}
 						progress={progressFraction}
 						colors={sliderColors}
+						waveHeight={animatedWaveHeight}
+						waveThickness={animatedWaveThickness}
+						trackThickness={animatedTrackThickness}
+						isPlaying={isPlaying}
+						chapterMarkers={markers}
+						thumbImageUri={sliderThumb?.normal}
+						thumbImageDragLeftUri={sliderThumb?.dragLeft}
+						thumbImageDragRightUri={sliderThumb?.dragRight}
+						thumbImageSize={hasSkinSliderThumb ? skinSliderThumbSize : undefined}
+						thumbImageOffsetX={
+							hasSkinSliderThumb ? skinSliderThumbOffsetX : undefined
+						}
+						thumbImageOffsetY={
+							hasSkinSliderThumb ? skinSliderThumbOffsetY : undefined
+						}
 						onValueChange={handleValueChange}
 						onValueChangeFinished={handleValueChangeFinished}
 						onDragStateChange={handleDragStateChange}
@@ -573,14 +755,14 @@ export function PlayerSlider({
 
 const styles = StyleSheet.create({
 	podcastSliderRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-	podcastSlider: { flex: 1, height: 25 },
+	podcastSlider: { flex: 1, height: 28 },
 	seekButton: { width: 48, height: 48, margin: 0 },
 	root: {
 		width: '100%',
 		justifyContent: 'center',
 	},
 	slider: {
-		height: 25,
+		height: 28,
 		width: '90%',
 		alignSelf: 'center',
 	},
@@ -598,21 +780,24 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		position: 'relative',
 	},
-	iosInactiveTrack: {
+	skiaCanvas: {
 		position: 'absolute',
 		left: 0,
 		right: 0,
-		height: 4,
-		borderRadius: 2,
+		top: 0,
+		bottom: 0,
+		height: 28,
 	},
-	iosActiveTrack: {
+	iosThumbWrapper: {
 		position: 'absolute',
-		left: 0,
-		height: 4,
-		borderRadius: 2,
+		top: 6,
+		width: 16,
+		height: 16,
+		justifyContent: 'center',
+		alignItems: 'center',
+		overflow: 'visible',
 	},
 	iosThumb: {
-		position: 'absolute',
 		width: 16,
 		height: 16,
 		borderRadius: 8,
