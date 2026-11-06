@@ -175,7 +175,7 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 						{subText}
 					</Animated.Text>
 				)}
-			</Touchable>
+			</AnimatedPressable>
 		</View>
 	)
 })
@@ -316,7 +316,7 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 						{subText}
 					</Animated.Text>
 				)}
-			</AnimatedTouchable>
+			</AnimatedPressable>
 		</View>
 	)
 })
