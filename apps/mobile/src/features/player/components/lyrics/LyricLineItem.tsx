@@ -1,7 +1,11 @@
 import { type LyricLine } from '@bbplayer/splash'
-import { memo, useState } from 'react'
-import { Pressable, StyleSheet, View } from 'react-native'
-import { Touchable } from 'react-native-gesture-handler'
+import { memo, useRef, useState } from 'react'
+import {
+	Pressable,
+	StyleSheet,
+	View,
+	type GestureResponderEvent,
+} from 'react-native'
 import { useTheme } from 'react-native-paper'
 import Animated, {
 	createAnimatedComponent,
@@ -16,7 +20,7 @@ import { scheduleOnRN } from 'react-native-worklets'
 
 import { KaraokeWord } from './KaraokeWord'
 
-const AnimatedTouchable = createAnimatedComponent(Touchable)
+const AnimatedPressable = createAnimatedComponent(Pressable)
 
 function useLyricColor(
 	isHighlighted: SharedValue<boolean>,
@@ -107,16 +111,37 @@ export const OldSchoolLyricLineItem = memo(function OldSchoolLyricLineItem({
 			? item.romaji || item.translation || item.translations?.[0]
 			: item.translation || item.romaji || item.translations?.[0]
 
+	const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+
+	const handleTouchStart = (e: GestureResponderEvent) => {
+		touchStartRef.current = {
+			x: e.nativeEvent.pageX,
+			y: e.nativeEvent.pageY,
+		}
+	}
+
+	const handlePress = (e: GestureResponderEvent) => {
+		if (touchStartRef.current) {
+			const dx = Math.abs(e.nativeEvent.pageX - touchStartRef.current.x)
+			const dy = Math.abs(e.nativeEvent.pageY - touchStartRef.current.y)
+			// 水平位移超过 8px 或垂直位移超过 12px 说明是在右滑返回或滚动，忽略点击跳转
+			if (dx > 8 || dy > 12) {
+				return
+			}
+		}
+		jumpToThisLyric(index)
+	}
+
 	return (
 		<View style={styles.oldSchoolItemWrapper}>
 			<Pressable
 				style={StyleSheet.absoluteFill}
 				onPress={onPressBackground}
 			/>
-			<Touchable
-				androidRipple={{}}
+			<AnimatedPressable
 				style={styles.oldSchoolItemButton}
-				onPress={() => jumpToThisLyric(index)}
+				onTouchStart={handleTouchStart}
+				onPress={handlePress}
 			>
 				{isVerbatim ? (
 					<View
@@ -251,16 +276,37 @@ export const ModernLyricLineItem = memo(function ModernLyricLineItem({
 			? item.romaji || item.translation || item.translations?.[0]
 			: item.translation || item.romaji || item.translations?.[0]
 
+	const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+
+	const handleTouchStart = (e: GestureResponderEvent) => {
+		touchStartRef.current = {
+			x: e.nativeEvent.pageX,
+			y: e.nativeEvent.pageY,
+		}
+	}
+
+	const handlePress = (e: GestureResponderEvent) => {
+		if (touchStartRef.current) {
+			const dx = Math.abs(e.nativeEvent.pageX - touchStartRef.current.x)
+			const dy = Math.abs(e.nativeEvent.pageY - touchStartRef.current.y)
+			// 水平位移超过 8px 或垂直位移超过 12px 说明是在右滑返回或滚动，忽略点击跳转
+			if (dx > 8 || dy > 12) {
+				return
+			}
+		}
+		jumpToThisLyric(index)
+	}
+
 	return (
 		<View style={styles.modernItemWrapper}>
 			<Pressable
 				style={StyleSheet.absoluteFill}
 				onPress={onPressBackground}
 			/>
-			<AnimatedTouchable
-				androidRipple={{}}
+			<AnimatedPressable
 				style={[styles.modernItemButton, containerAnimatedStyle]}
-				onPress={() => jumpToThisLyric(index)}
+				onTouchStart={handleTouchStart}
+				onPress={handlePress}
 			>
 				{renderContent()}
 				{subText && (

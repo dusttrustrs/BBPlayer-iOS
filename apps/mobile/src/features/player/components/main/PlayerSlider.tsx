@@ -1,13 +1,21 @@
 import { useIsPlaying } from '@bbplayer/orpheus'
 import Color from 'color'
 import { WavySlider } from 'expo-wavy-slider'
-import { useCallback, useEffect, useMemo } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+	PanResponder,
+	Platform,
+	StyleSheet,
+	View,
+	type StyleProp,
+	type ViewStyle,
+} from 'react-native'
 import AnimateableText from 'react-native-animateable-text'
 import { useTheme } from 'react-native-paper'
-import {
+import Animated, {
 	useAnimatedProps,
 	useAnimatedReaction,
+	useAnimatedStyle,
 	useDerivedValue,
 	useSharedValue,
 	withTiming,
@@ -103,9 +111,145 @@ function TextWithAnimation({
 
 interface PlayerSliderProps {
 	onInteraction?: () => void
+	onDragStateChange?: (dragging: boolean) => void
 }
 
-export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
+function IOSSlider({
+	enabled,
+	progress,
+	colors,
+	onValueChange,
+	onValueChangeFinished,
+	onDragStateChange,
+	style,
+}: {
+	enabled: boolean
+	progress: SharedValue<number>
+	colors: {
+		activeTrackColor: string
+		inactiveTrackColor: string
+		thumbColor: string
+	}
+	onValueChange: (value: number) => void
+	onValueChangeFinished: (value: number) => void
+	onDragStateChange: (dragging: boolean) => void
+	style?: StyleProp<ViewStyle>
+}) {
+	const [trackWidth, setTrackWidth] = useState(0)
+	const isDraggingRef = useRef(false)
+	const trackPageXRef = useRef(0)
+	const trackRef = useRef<View>(null)
+	const isDraggingShared = useSharedValue(false)
+
+	const panResponder = useMemo(
+		() =>
+			PanResponder.create({
+				onStartShouldSetPanResponder: () => enabled,
+				onMoveShouldSetPanResponder: (_, gs) => enabled && Math.abs(gs.dx) > 2,
+				onPanResponderGrant: (evt) => {
+					isDraggingRef.current = true
+					isDraggingShared.set(true)
+					onDragStateChange(true)
+					trackRef.current?.measure((_x, _y, width, _height, pageX) => {
+						if (width > 0) {
+							trackPageXRef.current = pageX
+							const currentX = evt.nativeEvent.pageX - pageX
+							const fraction = Math.max(0, Math.min(1, currentX / width))
+							onValueChange(fraction)
+						}
+					})
+				},
+				onPanResponderMove: (evt) => {
+					if (!isDraggingRef.current || trackWidth <= 0) return
+					const currentX = evt.nativeEvent.pageX - trackPageXRef.current
+					const fraction = Math.max(0, Math.min(1, currentX / trackWidth))
+					onValueChange(fraction)
+				},
+				onPanResponderRelease: (evt) => {
+					isDraggingRef.current = false
+					isDraggingShared.set(false)
+					if (trackWidth > 0) {
+						const currentX = evt.nativeEvent.pageX - trackPageXRef.current
+						const fraction = Math.max(0, Math.min(1, currentX / trackWidth))
+						onValueChangeFinished(fraction)
+					}
+					onDragStateChange(false)
+				},
+				onPanResponderTerminate: () => {
+					isDraggingRef.current = false
+					isDraggingShared.set(false)
+					onDragStateChange(false)
+				},
+			}),
+		[
+			enabled,
+			trackWidth,
+			onDragStateChange,
+			onValueChange,
+			onValueChangeFinished,
+			isDraggingShared,
+		],
+	)
+
+	const activeTrackAnimatedStyle = useAnimatedStyle(() => {
+		const p = Math.max(0, Math.min(1, progress.value || 0))
+		return {
+			width: `${p * 100}%`,
+		}
+	})
+
+	const thumbAnimatedStyle = useAnimatedStyle(() => {
+		const p = Math.max(0, Math.min(1, progress.value || 0))
+		return {
+			left: `${p * 100}%`,
+			transform: [
+				{ translateX: -8 },
+				{ scale: isDraggingShared.value ? 1.35 : 1 },
+			],
+		}
+	})
+
+	return (
+		<View
+			ref={trackRef}
+			style={[styles.iosSliderContainer, style]}
+			onLayout={(e) => {
+				const w = e.nativeEvent.layout.width
+				if (w > 0) setTrackWidth(w)
+				trackRef.current?.measure((_x, _y, _width, _height, pageX) => {
+					if (pageX) trackPageXRef.current = pageX
+				})
+			}}
+			{...panResponder.panHandlers}
+		>
+			<View
+				style={[
+					styles.iosInactiveTrack,
+					{ backgroundColor: colors.inactiveTrackColor },
+				]}
+			/>
+			<Animated.View
+				style={[
+					styles.iosActiveTrack,
+					{ backgroundColor: colors.activeTrackColor },
+					activeTrackAnimatedStyle,
+				]}
+			/>
+			<Animated.View
+				style={[
+					styles.iosThumb,
+					{ backgroundColor: colors.thumbColor },
+					thumbAnimatedStyle,
+				]}
+			/>
+		</View>
+	)
+}
+
+export function PlayerSlider({
+	onInteraction,
+	onDragStateChange: externalDragStateChange,
+}: PlayerSliderProps = {}) {
 	const trackId = useCurrentTrackId()
 	const nativeDuration = useTrackDuration()
 	const { chapters, podcast } = usePlayerChapters()
@@ -309,8 +453,11 @@ export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
 			'worklet'
 			isNativeDragging.set(dragging)
 			if (!dragging) isScrubbing.set(false)
+			if (externalDragStateChange) {
+				scheduleOnRN(externalDragStateChange, dragging)
+			}
 		},
-		[isNativeDragging, isScrubbing],
+		[isNativeDragging, isScrubbing, externalDragStateChange],
 	)
 
 	const sliderColors = useMemo(
@@ -361,34 +508,46 @@ export function PlayerSlider({ onInteraction }: PlayerSliderProps = {}) {
 						}}
 					/>
 				)}
-				<WavySlider
-					style={podcast ? styles.podcastSlider : styles.slider}
-					enabled={canSeek}
-					chapterMarkers={markers}
-					progress={progressFraction}
-					// bufferedProgress={bufferedFraction} 缓冲进度条在使用自定义 slider 时会出现一些样式问题，懒得修复了，反正音乐播放器不是很需要这个东西。
-					colors={sliderColors}
-					waveLength={30}
-					waveVelocity={animatedWaveVelocity}
-					waveDirection='head'
-					waveHeight={animatedWaveHeight}
-					waveThickness={animatedWaveThickness}
-					trackThickness={animatedTrackThickness}
-					thumbImageUri={sliderThumb?.normal}
-					thumbImageDragLeftUri={sliderThumb?.dragLeft}
-					thumbImageDragRightUri={sliderThumb?.dragRight}
-					thumbImageSize={hasSkinSliderThumb ? skinSliderThumbSize : undefined}
-					thumbImageOffsetX={
-						hasSkinSliderThumb ? skinSliderThumbOffsetX : undefined
-					}
-					thumbImageOffsetY={
-						hasSkinSliderThumb ? skinSliderThumbOffsetY : undefined
-					}
-					incremental={false}
-					onValueChange={handleValueChange}
-					onValueChangeFinished={handleValueChangeFinished}
-					onDragStateChange={handleDragStateChange}
-				/>
+				{Platform.OS === 'android' ? (
+					<WavySlider
+						style={podcast ? styles.podcastSlider : styles.slider}
+						enabled={canSeek}
+						chapterMarkers={markers}
+						progress={progressFraction}
+						// bufferedProgress={bufferedFraction} 缓冲进度条在使用自定义 slider 时会出现一些样式问题，懒得修复了，反正音乐播放器不是很需要这个东西。
+						colors={sliderColors}
+						waveLength={30}
+						waveVelocity={animatedWaveVelocity}
+						waveDirection='head'
+						waveHeight={animatedWaveHeight}
+						waveThickness={animatedWaveThickness}
+						trackThickness={animatedTrackThickness}
+						thumbImageUri={sliderThumb?.normal}
+						thumbImageDragLeftUri={sliderThumb?.dragLeft}
+						thumbImageDragRightUri={sliderThumb?.dragRight}
+						thumbImageSize={hasSkinSliderThumb ? skinSliderThumbSize : undefined}
+						thumbImageOffsetX={
+							hasSkinSliderThumb ? skinSliderThumbOffsetX : undefined
+						}
+						thumbImageOffsetY={
+							hasSkinSliderThumb ? skinSliderThumbOffsetY : undefined
+						}
+						incremental={false}
+						onValueChange={handleValueChange}
+						onValueChangeFinished={handleValueChangeFinished}
+						onDragStateChange={handleDragStateChange}
+					/>
+				) : (
+					<IOSSlider
+						enabled={canSeek}
+						progress={progressFraction}
+						colors={sliderColors}
+						onValueChange={handleValueChange}
+						onValueChangeFinished={handleValueChangeFinished}
+						onDragStateChange={handleDragStateChange}
+						style={podcast ? styles.podcastSlider : styles.slider}
+					/>
+				)}
 
 				{podcast && (
 					<IconButton
@@ -431,5 +590,36 @@ const styles = StyleSheet.create({
 		justifyContent: 'space-between',
 		width: '90%',
 		alignSelf: 'center',
+	},
+	iosSliderContainer: {
+		height: 28,
+		width: '90%',
+		alignSelf: 'center',
+		justifyContent: 'center',
+		position: 'relative',
+	},
+	iosInactiveTrack: {
+		position: 'absolute',
+		left: 0,
+		right: 0,
+		height: 4,
+		borderRadius: 2,
+	},
+	iosActiveTrack: {
+		position: 'absolute',
+		left: 0,
+		height: 4,
+		borderRadius: 2,
+	},
+	iosThumb: {
+		position: 'absolute',
+		width: 16,
+		height: 16,
+		borderRadius: 8,
+		shadowColor: '#000',
+		shadowOffset: { width: 0, height: 2 },
+		shadowOpacity: 0.25,
+		shadowRadius: 3,
+		elevation: 3,
 	},
 })

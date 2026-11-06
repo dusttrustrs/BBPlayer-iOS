@@ -102,9 +102,14 @@ export function TrackInfo({
 
 	return (
 		<View
-			style={{
-				position: 'relative',
-			}}
+			style={[
+				{
+					position: 'relative',
+				},
+				part === 'cover'
+					? { flex: 1, justifyContent: 'center', alignItems: 'center' }
+					: null,
+			]}
 		>
 			{part !== 'info' && (
 			<Computed>
@@ -120,7 +125,12 @@ export function TrackInfo({
 							style={[
 								styles.coverContainer,
 								coverMaxSize
-									? { height: coverMaxSize + 16, paddingHorizontal: 0 }
+									? {
+											height: coverMaxSize + 8,
+											paddingHorizontal: 0,
+											justifyContent: 'center',
+											alignItems: 'center',
+										}
 									: null,
 							]}
 							onPress={podcast ? undefined : onPressCover}

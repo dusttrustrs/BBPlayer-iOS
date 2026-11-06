@@ -44,6 +44,7 @@ const Lyrics = memo(function Lyrics({
 }) {
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
+	const isLandscape = dimensions.width > dimensions.height
 	const colors = useTheme().colors
 	const isFluidBackground = useAppStore(
 		(state) =>
@@ -296,7 +297,7 @@ const Lyrics = memo(function Lyrics({
 							return (
 								<Pressable
 									key='padding_item'
-									style={{ height: windowHeight / 2 }}
+									style={{ height: isLandscape ? 60 : windowHeight * 0.35 }}
 									onPress={onPressBackground}
 								/>
 							)
@@ -372,16 +373,19 @@ const Lyrics = memo(function Lyrics({
 							<LinearGradient
 								style={[
 									styles.gradient,
-									isFluidBackground && {
-										height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
-									},
+									!isLandscape &&
+										isFluidBackground && {
+											height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
+										},
 								]}
 								start={{ x: 0, y: 0 }}
 								end={{ x: 0, y: 1 }}
 								colors={[colors.background, 'transparent']}
 								locations={[
 									0,
-									isFluidBackground ? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT : 1,
+									!isLandscape && isFluidBackground
+										? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT
+										: 1,
 								]}
 							/>
 						</View>

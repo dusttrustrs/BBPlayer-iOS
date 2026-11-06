@@ -318,7 +318,7 @@ jobs:
           import { Show } from '@legendapp/state/react'
           import type { ImageRef } from 'expo-image'
           import { useRouter } from 'expo-router'
-          import { useEffect } from 'react'
+          import { useEffect, useState } from 'react'
           import { StyleSheet, useWindowDimensions, View } from 'react-native'
           import PagerView from 'react-native-pager-view'
           import Animated, {
@@ -341,8 +341,8 @@ jobs:
           const AnimatedPagerView = Animated.createAnimatedComponent(PagerView)
 
           /**
-           * 横屏播放器：左侧封面常驻；右侧是一个小 PagerView（播放控制 / 歌词）。
-           * 左滑进入歌词时，歌词页从右侧被「推」进来，封面保持不动。
+           * 横屏播放器：左侧封面常驻且居中；右侧是一个小 PagerView（播放控制 / 歌词）。
+           * 左滑进入歌词时，歌词页从右侧平滑切换，封面保持不动。
            */
           export function LandscapePlayer({
           	pagerRef,
@@ -363,34 +363,54 @@ jobs:
           	const insets = useSafeAreaInsets()
           	const currentTrack = useCurrentTrack()
           	const { width, height } = useWindowDimensions()
+          	const [isScrubbing, setIsScrubbing] = useState(false)
 
-          	// 进入横屏的小段入场动画；不降低透明度，动画被打断也不会留下半透明的界面
+          	// 进入横屏平滑动画
           	const p = useSharedValue(1)
           	useEffect(() => {
           		p.set(0)
-          		p.set(withTiming(1, { duration: 480, easing: Easing.bezier(0.2, 0.8, 0.2, 1) }))
+          		p.set(
+          			withTiming(1, {
+          				duration: 480,
+          				easing: Easing.bezier(0.2, 0.8, 0.2, 1),
+          			}),
+          		)
           	}, [p])
+
           	const coverStyle = useAnimatedStyle(() => ({
-          		transform: [
-          			{ translateX: -width * 0.12 * (1 - p.value) },
-          			{ scale: 1 + 0.08 * (1 - p.value) },
-          		],
+          		transform: [{ scale: 0.94 + 0.06 * p.value }],
+          		opacity: 0.5 + 0.5 * p.value,
           	}))
+
           	const rightStyle = useAnimatedStyle(() => ({
-          		transform: [{ translateX: 60 * (1 - p.value) }],
+          		transform: [{ translateX: 50 * (1 - p.value) }],
+          		opacity: 0.6 + 0.4 * p.value,
           	}))
 
           	if (!currentTrack) return null
           	const padL = Math.max(insets.left, 24)
           	const padR = Math.max(insets.right, 24)
-          	// 封面缩小，给旋转光环留出空间
-          	const coverSize = Math.min(220, width * 0.34, height - 56 - 64)
+
+          	// 动态计算封面尺寸：居中并充分利用高度与宽度，不再受制于过小的 220px 限制
+          	const availHeight = height - 52 - Math.max(insets.bottom, 12)
+          	const availWidth = (width - padL - padR - 32) * 0.44
+          	const coverSize = Math.floor(Math.min(availWidth, availHeight * 0.94, 340))
           	const isPodcast = playbackContextStore$.context.mode.peek() === 'podcast'
 
           	return (
           		<Show if={playbackContextStore$.ready}>
-          			<View style={[styles.row, { paddingLeft: padL, paddingRight: padR }]}>
-          				<Animated.View style={[styles.left, { width: width * 0.4 }, coverStyle]}>
+          			<View
+          				style={[
+          					styles.row,
+          					{
+          						paddingLeft: padL,
+          						paddingRight: padR,
+          						paddingBottom: Math.max(insets.bottom, 8),
+          					},
+          				]}
+          			>
+          				{/* 左侧封面居中常驻展示 */}
+          				<Animated.View style={[styles.left, coverStyle]}>
           					<TrackInfo
           						part='cover'
           						coverMaxSize={coverSize}
@@ -402,13 +422,15 @@ jobs:
           						coverRef={imageRef}
           					/>
           				</Animated.View>
+
+          				{/* 右侧分页：主控制页 / 纯歌词页 */}
           				<Animated.View style={[styles.right, rightStyle]}>
           					<AnimatedPagerView
           						key={isPodcast ? 'podcast' : 'music'}
           						ref={pagerRef}
           						style={styles.flex}
           						initialPage={index}
-          						scrollEnabled={!isPodcast}
+          						scrollEnabled={!isPodcast && !isScrubbing}
           						// eslint-disable-next-line @typescript-eslint/no-explicit-any
           						onPageScroll={onPageScroll as any}
           						onPageSelected={(e) => setIndex(e.nativeEvent.position)}
@@ -432,7 +454,7 @@ jobs:
           									coverRef={imageRef}
           								/>
           								<View style={styles.gap}>
-          									<PlayerSlider />
+          									<PlayerSlider onDragStateChange={setIsScrubbing} />
           								</View>
           								<PlayerControls
           									onOpenQueue={() => {
@@ -463,11 +485,31 @@ jobs:
 
           const styles = StyleSheet.create({
           	flex: { flex: 1 },
-          	row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 16 },
-          	left: { alignItems: 'center', justifyContent: 'center' },
-          	right: { flex: 1, alignSelf: 'stretch' },
-          	page: { flex: 1, justifyContent: 'center' },
-          	gap: { marginTop: 16, marginBottom: 20 },
+          	row: {
+          		flex: 1,
+          		flexDirection: 'row',
+          		alignItems: 'center',
+          		gap: 20,
+          	},
+          	left: {
+          		flex: 0.44,
+          		alignItems: 'center',
+          		justifyContent: 'center',
+          		alignSelf: 'stretch',
+          	},
+          	right: {
+          		flex: 0.56,
+          		alignSelf: 'stretch',
+          	},
+          	page: {
+          		flex: 1,
+          		justifyContent: 'center',
+          		paddingHorizontal: 8,
+          	},
+          	gap: {
+          		marginTop: 14,
+          		marginBottom: 16,
+          	},
           })
           EOF_LANDSCAPE_PLAYER
           node << 'EOF'

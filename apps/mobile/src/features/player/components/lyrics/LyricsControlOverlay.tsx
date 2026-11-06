@@ -1,10 +1,10 @@
 import { Icon as ExpoIcon } from '@expo/ui'
-import MaskedView from '@react-native-masked-view/masked-view'
 import { LinearGradient } from 'expo-linear-gradient'
 import { memo } from 'react'
-import { Dimensions, StyleSheet, View } from 'react-native'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Touchable } from 'react-native-gesture-handler'
 import { Icon, useTheme } from 'react-native-paper'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { MenuView } from '@/components/common/FunctionalMenu'
 import { MainPlaybackControls } from '@/features/player/components/controls/PlayerControlContent'
@@ -32,9 +32,7 @@ const OFFSET_ICON = ExpoIcon.select({
 	android: import('@expo/material-symbols/swap_vertical_circle.xml'),
 })
 
-const { height: windowHeight } = Dimensions.get('window')
-// 面板高度 = 底部控件（~211px）+ 顶部 60px 渐隐条，刚好延伸到菜单按钮上方
-export const LYRICS_CONTROLS_OVERLAY_HEIGHT = Math.min(windowHeight * 0.4, 280)
+export const LYRICS_CONTROLS_OVERLAY_HEIGHT = 220
 
 interface LyricsControlOverlayProps {
 	offsetMenuVisible: boolean
@@ -54,6 +52,10 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 	onOpenOffsetMenu,
 }: LyricsControlOverlayProps) {
 	const { colors } = useTheme()
+	const insets = useSafeAreaInsets()
+	const { width, height } = useWindowDimensions()
+	const isLandscape = width > height
+
 	const isFluidBackground = useAppStore(
 		(state) =>
 			!state.settings.pureWhiteBackground &&
@@ -84,37 +86,37 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 		})
 	}
 
+	// 横屏状态下彻底去除歌词界面下方的进度条与播放控制按钮
+	if (isLandscape) {
+		return null
+	}
+
+	const paddingBottom = Math.max(insets.bottom + 8, 16)
+	const overlayHeight = 185 + paddingBottom
+
 	return (
-		<MaskedView
-			style={styles.overlayContainer}
-			maskElement={
-				<View
-					style={styles.maskElement}
-					pointerEvents='none'
-				>
-					<LinearGradient
-						style={styles.gradient}
-						start={{ x: 0, y: 0 }}
-						end={{ x: 0, y: 1 }}
-						colors={['transparent', colors.background]}
-						locations={[0, 1]}
-					/>
-					<View
-						style={[styles.maskSolid, { backgroundColor: colors.background }]}
-					/>
-				</View>
-			}
+		<View
+			style={[
+				styles.overlayContainer,
+				{
+					height: overlayHeight,
+				},
+			]}
+			pointerEvents='box-none'
 		>
-			{/* 流体模式直接透出整页背景，歌词自身的遮罩负责避让控件。 */}
-			{!isFluidBackground && (
-				<View
-					style={[
-						StyleSheet.absoluteFill,
-						{ backgroundColor: colors.background },
-					]}
-				/>
-			)}
-			<View style={styles.playerControls}>
+			{/* 防重叠渐变底色，确保歌词在控件后方优雅渐隐，不干扰进度条与按钮 */}
+			<LinearGradient
+				style={StyleSheet.absoluteFill}
+				start={{ x: 0, y: 0 }}
+				end={{ x: 0, y: 0.35 }}
+				colors={[
+					'rgba(0, 0, 0, 0)',
+					isFluidBackground ? 'rgba(16, 16, 18, 0.92)' : colors.background,
+				]}
+				pointerEvents='none'
+			/>
+
+			<View style={[styles.playerControls, { paddingBottom }]}>
 				{/* 功能按钮，位于 slider 上方右侧 */}
 				<View style={styles.actionMenuRow}>
 					<MenuView {...menuActions}>
@@ -138,7 +140,7 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 					<MainPlaybackControls size='compact' />
 				</View>
 			</View>
-		</MaskedView>
+		</View>
 	)
 })
 
@@ -148,34 +150,23 @@ const styles = StyleSheet.create({
 		bottom: 0,
 		left: 0,
 		right: 0,
-		height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
-	},
-	maskElement: {
-		flex: 1,
-	},
-	maskSolid: {
-		flex: 1,
-	},
-	gradient: {
-		height: 60,
+		justifyContent: 'flex-end',
 	},
 	playerControls: {
-		position: 'absolute',
-		bottom: 50,
-		left: 0,
-		right: 0,
+		width: '100%',
+		paddingTop: 10,
 	},
 	actionMenuRow: {
 		flexDirection: 'row',
 		justifyContent: 'flex-end',
 		paddingHorizontal: 16,
-		marginBottom: 4,
+		marginBottom: 2,
 	},
 	actionMenuButton: {
 		borderRadius: 99999,
-		padding: 10,
+		padding: 8,
 	},
 	playbackButtonsWrapper: {
-		marginTop: 8,
+		marginTop: 4,
 	},
 })
