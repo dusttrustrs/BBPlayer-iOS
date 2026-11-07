@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import PagerView from 'react-native-pager-view'
 import Animated, {
+	createAnimatedComponent,
 	Easing,
 	useAnimatedStyle,
 	useSharedValue,
@@ -21,7 +22,7 @@ import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
 import * as Haptics from '@/utils/haptics'
 
-const AnimatedPagerView = Animated.createAnimatedComponent(PagerView)
+const AnimatedPagerView = createAnimatedComponent(PagerView)
 
 /**
  * 横屏播放器：左侧封面常驻且居中；右侧是一个小 PagerView（播放控制 / 歌词）。

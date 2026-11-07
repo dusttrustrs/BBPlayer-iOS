@@ -26,6 +26,12 @@ export default function PlaybackSettingsPage() {
 	const defaultPlayerMode = useAppStore(
 		(state) => state.settings.defaultPlayerMode,
 	)
+	const enableSwipeToOpenComments = useAppStore(
+		(state) => state.settings.enableSwipeToOpenComments ?? true,
+	)
+	const enableSwipeToSwitchTrack = useAppStore(
+		(state) => state.settings.enableSwipeToSwitchTrack ?? true,
+	)
 	const setSettings = useAppStore((state) => state.setSettings)
 
 	const [enablePersistCurrentPosition, setEnablePersistCurrentPosition] =
@@ -139,6 +145,36 @@ export default function PlaybackSettingsPage() {
 								return
 							}
 							setEnableAutostartPlayOnStart(!enableAutostartPlayOnStart)
+						}}
+					/>
+				</View>
+
+				<SettingsSectionTitle title='手势控制' />
+				<View style={styles.settingRow}>
+					<View style={{ flexShrink: 1, paddingRight: 12 }}>
+						<Text>底部上滑开启评论区</Text>
+						<Text variant='bodySmall'>
+							开启后从音乐播放器底部向上滑动可开启卡片样式评论区，支持向上拉伸为完整评论区（横屏仅占用右侧播放控制区域）。
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={enableSwipeToOpenComments}
+						onValueChange={(value) => {
+							setSettings({ enableSwipeToOpenComments: value })
+						}}
+					/>
+				</View>
+				<View style={styles.settingRow}>
+					<View style={{ flexShrink: 1, paddingRight: 12 }}>
+						<Text>上下滑动切换歌曲</Text>
+						<Text variant='bodySmall'>
+							开启后在歌曲播放界面上下滑动直接进入上一首/下一首歌曲（仿抖音滑动切歌动效）；关闭后禁用切歌滑动手势。
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={enableSwipeToSwitchTrack}
+						onValueChange={(value) => {
+							setSettings({ enableSwipeToSwitchTrack: value })
 						}}
 					/>
 				</View>

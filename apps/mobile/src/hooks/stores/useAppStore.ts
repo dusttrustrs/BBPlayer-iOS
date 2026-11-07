@@ -142,6 +142,8 @@ export const useAppStore = create<AppState>()(
 					allowSimultaneousPlayback: false,
 					expandMultiPageOnSync: null,
 					hideStarPrompt: false,
+					enableSwipeToOpenComments: true,
+					enableSwipeToSwitchTrack: true,
 				},
 				bilibiliUserInfo: null,
 				bbplayerAccount: null,

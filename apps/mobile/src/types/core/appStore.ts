@@ -17,6 +17,8 @@ interface Settings {
 	expandMultiPageOnSync: boolean | null // null = 用户尚未选择过（首次同步时询问）
 	hideStarPrompt: boolean // 用户是否点击过「不再显示」Star 提示
 	enableWavyProgressBar?: boolean
+	enableSwipeToOpenComments?: boolean
+	enableSwipeToSwitchTrack?: boolean
 }
 
 interface BilibiliUserSummary {

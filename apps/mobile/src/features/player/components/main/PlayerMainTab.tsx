@@ -1,4 +1,4 @@
-import { Orpheus } from '@bbplayer/orpheus'
+import { Orpheus, RepeatMode } from '@bbplayer/orpheus'
 import { Show } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
@@ -15,15 +15,22 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
+import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
+import useCurrentTrackId from '@/hooks/player/useCurrentTrackId'
+import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
+import useAppStore from '@/hooks/stores/useAppStore'
+import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
+import { usePlayerQueueStore } from '@/hooks/stores/usePlayerQueueStore'
 import { analyticsService } from '@/lib/services/analyticsService'
 import * as Haptics from '@/utils/haptics'
 
 import { PlayerSlider } from './PlayerSlider'
 import { TrackInfo } from './PlayerTrackInfo'
+import { PlayerTrackPreview } from './PlayerTrackPreview'
 
 interface PlayerMainTabProps {
 	jumpTo: (key: string) => void
@@ -41,9 +48,53 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
 	const currentTrack = useCurrentTrack()
+	const currentTrackId = useCurrentTrackId()
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
 	const [isDraggingSlider, setIsDraggingSlider] = useState(false)
+
+	const enableSwipeToSwitchTrack = useAppStore(
+		(state) => state.settings.enableSwipeToSwitchTrack ?? true,
+	)
+	const enableSwipeToOpenComments = useAppStore(
+		(state) => state.settings.enableSwipeToOpenComments ?? true,
+	)
+
+	const isCommentsOpen = usePlayerCommentsStore((state) => state.isOpen)
+	const bvid =
+		currentTrack?.source === 'bilibili'
+			? currentTrack.bilibiliMetadata.bvid
+			: undefined
+
+	const queueTracks = usePlayerQueueStore((state) => state.tracks)
+	const { repeat: repeatMode } = usePlaybackOptions()
+
+	const currentIndex = useMemo(() => {
+		if (!currentTrackId) return -1
+		return queueTracks.findIndex((t) => t.id === currentTrackId)
+	}, [currentTrackId, queueTracks])
+
+	const nextTrack = useMemo(() => {
+		if (currentIndex < 0 || queueTracks.length === 0) return null
+		if (currentIndex + 1 < queueTracks.length) {
+			return queueTracks[currentIndex + 1]
+		}
+		if (repeatMode === RepeatMode.QUEUE && queueTracks.length > 1) {
+			return queueTracks[0]
+		}
+		return null
+	}, [currentIndex, queueTracks, repeatMode])
+
+	const prevTrack = useMemo(() => {
+		if (currentIndex < 0 || queueTracks.length === 0) return null
+		if (currentIndex > 0) {
+			return queueTracks[currentIndex - 1]
+		}
+		if (repeatMode === RepeatMode.QUEUE && queueTracks.length > 1) {
+			return queueTracks[queueTracks.length - 1]
+		}
+		return null
+	}, [currentIndex, queueTracks, repeatMode])
 
 	const handleSkipNext = useCallback(() => {
 		const now = Date.now()
@@ -64,42 +115,117 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	}, [])
 
 	const swipeTranslateY = useSharedValue(0)
+	const isTransitioning = useSharedValue(false)
 
 	const swipeAnimatedStyle = useAnimatedStyle(() => ({
 		transform: [{ translateY: swipeTranslateY.value }],
 	}))
 
+	const hasNext = !!nextTrack
+	const hasPrev = !!prevTrack
+
+	// 仿抖音上下滑切歌手势：滑屏直接呈现下一首/上一首歌曲页面
 	const panGesture = useMemo(() => {
 		return Gesture.Pan()
-			.enabled(!isDraggingSlider)
-			.activeOffsetY([-25, 25])
+			.enabled(enableSwipeToSwitchTrack && !isDraggingSlider)
+			.activeOffsetY([-20, 20])
 			.failOffsetX([-25, 25])
 			.onUpdate((e) => {
 				'worklet'
-				swipeTranslateY.set(e.translationY * 0.35)
+				if (isTransitioning.value) return
+				if (e.translationY < 0) {
+					// 向上滑动
+					swipeTranslateY.set(hasNext ? e.translationY : e.translationY * 0.25)
+				} else {
+					// 向下滑动
+					swipeTranslateY.set(hasPrev ? e.translationY : e.translationY * 0.25)
+				}
 			})
 			.onEnd((e) => {
 				'worklet'
-				const threshold = 60
-				const velocityThreshold = 500
+				if (isTransitioning.value) return
+				const threshold = 70
+				const velocityThreshold = 450
+
 				if (
-					e.translationY < -threshold ||
-					(e.translationY < -20 && e.velocityY < -velocityThreshold)
+					(e.translationY < -threshold ||
+						(e.translationY < -20 && e.velocityY < -velocityThreshold)) &&
+					hasNext
 				) {
-					scheduleOnRN(handleSkipNext)
+					isTransitioning.set(true)
+					swipeTranslateY.set(
+						withTiming(
+							-height,
+							{ duration: 220, easing: Easing.out(Easing.cubic) },
+							(finished) => {
+								if (finished) {
+									scheduleOnRN(handleSkipNext)
+									swipeTranslateY.set(0)
+									isTransitioning.set(false)
+								}
+							},
+						),
+					)
 				} else if (
-					e.translationY > threshold ||
-					(e.translationY > 20 && e.velocityY > velocityThreshold)
+					(e.translationY > threshold ||
+						(e.translationY > 20 && e.velocityY > velocityThreshold)) &&
+					hasPrev
 				) {
-					scheduleOnRN(handleSkipPrevious)
+					isTransitioning.set(true)
+					swipeTranslateY.set(
+						withTiming(
+							height,
+							{ duration: 220, easing: Easing.out(Easing.cubic) },
+							(finished) => {
+								if (finished) {
+									scheduleOnRN(handleSkipPrevious)
+									swipeTranslateY.set(0)
+									isTransitioning.set(false)
+								}
+							},
+						),
+					)
+				} else {
+					swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
 				}
-				swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
 			})
 			.onFinalize(() => {
 				'worklet'
-				swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
+				if (!isTransitioning.value) {
+					swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
+				}
 			})
-	}, [isDraggingSlider, handleSkipNext, handleSkipPrevious, swipeTranslateY])
+	}, [
+		enableSwipeToSwitchTrack,
+		isDraggingSlider,
+		hasNext,
+		hasPrev,
+		height,
+		handleSkipNext,
+		handleSkipPrevious,
+		swipeTranslateY,
+		isTransitioning,
+	])
+
+	// 底部向上滑动手势：开启卡片样式评论区
+	const bottomCommentsGesture = useMemo(() => {
+		return Gesture.Pan()
+			.enabled(enableSwipeToOpenComments && !isDraggingSlider)
+			.activeOffsetY([-15, 15])
+			.failOffsetX([-25, 25])
+			.onEnd((e) => {
+				'worklet'
+				if (
+					e.translationY < -30 ||
+					(e.translationY < -15 && e.velocityY < -350)
+				) {
+					scheduleOnRN(() => {
+						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+						usePlayerCommentsStore.getState().open()
+					})
+				}
+			})
+	}, [enableSwipeToOpenComments, isDraggingSlider])
 
 	// 0 = 刚旋转完（元素还在「旧位置」），1 = 各就各位；每次方向变化重播一遍编排
 	const p = useSharedValue(1)
@@ -150,6 +276,8 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	})
 
 	if (!currentTrack) return null
+
+	// 横屏布局：左侧封面，右侧播放控制区域（评论区开启时卡片只占据右侧区域）
 	if (isLandscape) {
 		const padH = Math.max(insets.left, insets.right, 24)
 		const coverSize = Math.min(width * 0.42, height - 56 - 24)
@@ -172,10 +300,59 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							/>
 						</Animated.View>
 					</GestureDetector>
+
 					<View style={styles.landscapeRight}>
-						<Animated.View style={infoStyle}>
+						{isCommentsOpen ? (
+							<PlayerCommentsCard
+								bvid={bvid}
+								isLandscape={true}
+							/>
+						) : (
+							<GestureDetector gesture={bottomCommentsGesture}>
+								<View style={styles.landscapeRightContent}>
+									<Animated.View style={infoStyle}>
+										<TrackInfo
+											part='info'
+											onArtistPress={() =>
+												currentTrack.artist?.remoteId
+													? router.navigate({
+															pathname: '/playlist/remote/uploader/[mid]',
+															params: { mid: currentTrack.artist?.remoteId },
+														})
+													: void 0
+											}
+											onPressCover={() => void 0}
+											coverRef={imageRef}
+										/>
+									</Animated.View>
+									<Animated.View style={[styles.landscapeGap, sliderStyle]}>
+										<PlayerSlider onDragStateChange={setIsDraggingSlider} />
+									</Animated.View>
+									<Animated.View style={controlsStyle}>
+										<PlayerControls
+											onOpenQueue={() => {
+												onPresent()
+												void usePlayerQueueSheetStore.getState().open()
+											}}
+										/>
+									</Animated.View>
+								</View>
+							</GestureDetector>
+						)}
+					</View>
+				</View>
+			</Show>
+		)
+	}
+
+	// 竖屏布局：仿抖音垂直滑屏切歌 + 底部上滑开启卡片式评论区
+	return (
+		<Show if={playbackContextStore$.ready}>
+			<View style={styles.viewportWrapper}>
+				<Animated.View style={[styles.container, swipeAnimatedStyle]}>
+					<GestureDetector gesture={panGesture}>
+						<View style={styles.trackInfoWrapper}>
 							<TrackInfo
-								part='info'
 								onArtistPress={() =>
 									currentTrack.artist?.remoteId
 										? router.navigate({
@@ -184,73 +361,120 @@ const PlayerMainTab = memo(function PlayerMainTab({
 											})
 										: void 0
 								}
-								onPressCover={() => void 0}
+								onPressCover={() => {
+									void Haptics.performHaptics(
+										Haptics.AndroidHaptics.Context_Click,
+									)
+									jumpTo('lyrics')
+								}}
 								coverRef={imageRef}
 							/>
-						</Animated.View>
-						<Animated.View style={[styles.landscapeGap, sliderStyle]}>
+						</View>
+					</GestureDetector>
+
+					<GestureDetector gesture={bottomCommentsGesture}>
+						<View
+							style={[
+								{ paddingBottom: Math.max(insets.bottom + 20, 20) },
+								styles.controlsContainer,
+							]}
+						>
 							<PlayerSlider onDragStateChange={setIsDraggingSlider} />
-						</Animated.View>
-						<Animated.View style={controlsStyle}>
 							<PlayerControls
 								onOpenQueue={() => {
 									onPresent()
 									void usePlayerQueueSheetStore.getState().open()
 								}}
 							/>
-						</Animated.View>
-					</View>
-				</View>
-			</Show>
-		)
-	}
-	return (
-		<Show if={playbackContextStore$.ready}>
-			<GestureDetector gesture={panGesture}>
-				<Animated.View style={[styles.container, swipeAnimatedStyle]}>
-					<TrackInfo
-						onArtistPress={() =>
-							currentTrack.artist?.remoteId
-								? router.navigate({
-										pathname: '/playlist/remote/uploader/[mid]',
-										params: { mid: currentTrack.artist?.remoteId },
-									})
-								: void 0
-						}
-						onPressCover={() => {
-							void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-							jumpTo('lyrics')
-						}}
-						coverRef={imageRef}
-					/>
-
-					<View
-						style={[
-							{ paddingBottom: Math.max(insets.bottom + 20, 20) },
-							styles.controlsContainer,
-						]}
-					>
-						<PlayerSlider onDragStateChange={setIsDraggingSlider} />
-						<PlayerControls
-							onOpenQueue={() => {
-								onPresent()
-								void usePlayerQueueSheetStore.getState().open()
-							}}
-						/>
-					</View>
+							{enableSwipeToOpenComments && (
+								<View style={styles.bottomPillArea}>
+									<View style={styles.bottomPill} />
+								</View>
+							)}
+						</View>
+					</GestureDetector>
 				</Animated.View>
-			</GestureDetector>
+
+				{/* 仿抖音垂直切歌预览：当向上滑动时下一首直接滑入 */}
+				{hasNext && (
+					<Animated.View
+						style={[
+							styles.previewContainer,
+							{ top: height },
+							swipeAnimatedStyle,
+						]}
+						pointerEvents='none'
+					>
+						<PlayerTrackPreview
+							track={nextTrack}
+							width={width}
+							insets={insets}
+						/>
+					</Animated.View>
+				)}
+
+				{/* 仿抖音垂直切歌预览：当向下滑动时上一首直接滑入 */}
+				{hasPrev && (
+					<Animated.View
+						style={[
+							styles.previewContainer,
+							{ top: -height },
+							swipeAnimatedStyle,
+						]}
+						pointerEvents='none'
+					>
+						<PlayerTrackPreview
+							track={prevTrack}
+							width={width}
+							insets={insets}
+						/>
+					</Animated.View>
+				)}
+
+				{/* 竖屏卡片式评论区 */}
+				<PlayerCommentsCard
+					bvid={bvid}
+					isLandscape={false}
+				/>
+			</View>
 		</Show>
 	)
 })
 
 const styles = StyleSheet.create({
+	viewportWrapper: {
+		flex: 1,
+		overflow: 'hidden',
+		position: 'relative',
+	},
 	container: {
 		flex: 1,
 		justifyContent: 'space-between',
 	},
+	trackInfoWrapper: {
+		flex: 1,
+		justifyContent: 'center',
+	},
+	previewContainer: {
+		position: 'absolute',
+		left: 0,
+		right: 0,
+		bottom: 0,
+		height: '100%',
+	},
 	controlsContainer: {
 		paddingHorizontal: 24,
+	},
+	bottomPillArea: {
+		alignItems: 'center',
+		paddingTop: 8,
+		paddingBottom: 2,
+	},
+	bottomPill: {
+		width: 36,
+		height: 3,
+		borderRadius: 1.5,
+		backgroundColor: 'rgba(150, 150, 150, 0.35)',
 	},
 	landscapeRow: {
 		flex: 1,
@@ -265,6 +489,10 @@ const styles = StyleSheet.create({
 	},
 	landscapeRight: {
 		flex: 0.58,
+		justifyContent: 'center',
+	},
+	landscapeRightContent: {
+		flex: 1,
 		justifyContent: 'center',
 	},
 	landscapeGap: {

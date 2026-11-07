@@ -5,8 +5,8 @@ import { Computed, useObserveEffect } from '@legendapp/state/react'
 import { Canvas, LinearGradient, Rect, vec } from '@shopify/react-native-skia'
 import { useImage } from 'expo-image'
 import { useObserve } from 'expo-observe'
-import * as ScreenOrientation from 'expo-screen-orientation'
 import { router, useIsFocused } from 'expo-router'
+import * as ScreenOrientation from 'expo-screen-orientation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
 	AppState,
@@ -38,9 +38,13 @@ import { PlayerFunctionalMenu } from '@/features/player/components/menu/PlayerFu
 import { FluidBackground } from '@/features/player/components/visuals/FluidBackground'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import usePreventRemove from '@/hooks/router/usePreventRemove'
-import { playbackContextStore$, playerSliderDragging$ } from '@/hooks/stores/playbackContextStore'
+import {
+	playbackContextStore$,
+	playerSliderDragging$,
+} from '@/hooks/stores/playbackContextStore'
 import useAppStore from '@/hooks/stores/useAppStore'
 import { usePlayerChaptersSheetStore } from '@/hooks/stores/usePlayerChaptersSheetStore'
+import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
 import { resolveBilibiliImageUrl, resolveTrackCover } from '@/utils/imageUrl'
 import log, { reportErrorToSentry } from '@/utils/log'
@@ -178,6 +182,10 @@ export default function PlayerPage() {
 	}, [isPreventingBack])
 
 	const handleDismiss = () => {
+		if (usePlayerCommentsStore.getState().isOpen) {
+			usePlayerCommentsStore.getState().close()
+			return
+		}
 		if (index === 1) {
 			pagerRef.current?.setPage(0)
 			return
@@ -275,6 +283,11 @@ export default function PlayerPage() {
 	usePreventRemove(isPreventingBack, () => {
 		if (menuVisible) {
 			setMenuVisible(false)
+			return
+		}
+
+		if (usePlayerCommentsStore.getState().isOpen) {
+			usePlayerCommentsStore.getState().close()
 			return
 		}
 

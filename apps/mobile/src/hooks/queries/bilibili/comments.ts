@@ -11,7 +11,11 @@ export const commentQueryKeys = {
 		[...commentQueryKeys.all, 'reply', bvid, rpid] as const,
 } as const
 
-export function useComments(bvid: string, mode = 3) {
+export function useComments(
+	bvid: string,
+	mode = 3,
+	options?: { enabled?: boolean },
+) {
 	return useInfiniteQuery({
 		queryKey: commentQueryKeys.results(bvid, mode),
 		queryFn: async ({ pageParam, signal }) => {
@@ -25,6 +29,7 @@ export function useComments(bvid: string, mode = 3) {
 			if (lastPage.cursor.is_end) return undefined
 			return lastPage.cursor.next
 		},
+		enabled: options?.enabled ?? !!bvid,
 	})
 }
 
