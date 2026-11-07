@@ -188,11 +188,11 @@ export default function SharedPlaylistPreviewPage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction onPress={() => router.back()} />
 				<Appbar.Content
 					title={data.playlist.title}
 					onPress={handleDoubleTap}
 				/>
-				<Appbar.BackAction onPress={() => router.back()} />
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

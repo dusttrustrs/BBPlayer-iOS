@@ -72,8 +72,8 @@ export default function ReplyCommentsPage() {
 			style={[styles.container, { backgroundColor: theme.colors.background }]}
 		>
 			<Appbar.Header elevated>
-				<Appbar.Content title={'评论区'} />
 				<Appbar.BackAction onPress={() => router.back()} />
+				<Appbar.Content title={'评论区'} />
 			</Appbar.Header>
 			{isLoading ? (
 				<View style={styles.center}>

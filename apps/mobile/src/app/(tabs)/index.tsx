@@ -255,71 +255,83 @@ export default function SearchPage() {
 				/>
 			)}
 			<View
-				pointerEvents='none'
-				style={[styles.header, { paddingTop: insets.top + 8 }]}
+				pointerEvents='box-none'
+				style={{
+					flex: 1,
+					paddingLeft: insets.left,
+					paddingRight: insets.right,
+				}}
 			>
-				<Text
-					variant='headlineSmall'
-					style={[styles.title, { color: headerForegroundColor }]}
+				<View
+					pointerEvents='none'
+					style={[styles.header, { paddingTop: insets.top + 8 }]}
 				>
-					搜索
-				</Text>
-			</View>
-			<View
-				pointerEvents='box-none'
-				style={styles.searchbarContainer}
-			>
-				<Searchbar
-					ref={searchBarRef}
-					placeholder='关键词 / b23.tv / 视频链接 / av / BV'
-					value={searchQuery}
-					onChangeText={setSearchQuery}
-					onSubmitEditing={() => void handleEnter(searchQuery)}
-					onIconPress={() => void handleEnter(searchQuery)}
-					onClearIconPress={() => setSearchQuery('')}
-					onFocus={() => setSearchFocused(true)}
-					onBlur={() => setSearchFocused(false)}
-					loading={isLoading}
-					editable={!isLoading}
-					returnKeyType='search'
-					elevation={0}
-					mode='bar'
-					style={[styles.searchbar, { backgroundColor: colors.surfaceVariant }]}
-					testID='search-bar'
-				/>
-			</View>
-			<View
-				pointerEvents='box-none'
-				style={[styles.content, { paddingBottom: contentBottomPadding }]}
-				onLayout={({ nativeEvent }) =>
-					setContentHeight(nativeEvent.layout.height)
-				}
-			>
-				{isResolving ? (
-					<ActivityIndicator style={styles.resolving} />
-				) : (
-					<>
-						<SearchHistory
-							searchHistory={searchHistory}
-							onHistoryPress={handleSuggestionPress}
-							onClearHistory={handleClearHistory}
-							onRemoveHistoryItem={handleRemoveHistoryItem}
-							onDismiss={dismissPanel}
-							panelVisible={suggestionsVisible}
-						/>
-						<View
-							pointerEvents='box-none'
-							style={styles.suggestions}
-						>
-							<SearchSuggestions
-								query={deferredSearchQuery}
-								visible={suggestionsVisible}
-								availableHeight={contentHeight - contentBottomPadding}
-								onSuggestionPress={handleSuggestionPress}
+					<Text
+						variant='headlineSmall'
+						style={[styles.title, { color: headerForegroundColor }]}
+					>
+						搜索
+					</Text>
+				</View>
+				<View
+					pointerEvents='box-none'
+					style={styles.searchbarContainer}
+				>
+					<Searchbar
+						ref={searchBarRef}
+						placeholder='关键词 / b23.tv / 视频链接 / av / BV'
+						value={searchQuery}
+						onChangeText={setSearchQuery}
+						onSubmitEditing={() => void handleEnter(searchQuery)}
+						onIconPress={() => void handleEnter(searchQuery)}
+						onClearIconPress={() => setSearchQuery('')}
+						onFocus={() => setSearchFocused(true)}
+						onBlur={() => setSearchFocused(false)}
+						loading={isLoading}
+						editable={!isLoading}
+						returnKeyType='search'
+						elevation={0}
+						mode='bar'
+						style={[
+							styles.searchbar,
+							{ backgroundColor: colors.surfaceVariant },
+						]}
+						testID='search-bar'
+					/>
+				</View>
+				<View
+					pointerEvents='box-none'
+					style={[styles.content, { paddingBottom: contentBottomPadding }]}
+					onLayout={({ nativeEvent }) =>
+						setContentHeight(nativeEvent.layout.height)
+					}
+				>
+					{isResolving ? (
+						<ActivityIndicator style={styles.resolving} />
+					) : (
+						<>
+							<SearchHistory
+								searchHistory={searchHistory}
+								onHistoryPress={handleSuggestionPress}
+								onClearHistory={handleClearHistory}
+								onRemoveHistoryItem={handleRemoveHistoryItem}
+								onDismiss={dismissPanel}
+								panelVisible={suggestionsVisible}
 							/>
-						</View>
-					</>
-				)}
+							<View
+								pointerEvents='box-none'
+								style={styles.suggestions}
+							>
+								<SearchSuggestions
+									query={deferredSearchQuery}
+									visible={suggestionsVisible}
+									availableHeight={contentHeight - contentBottomPadding}
+									onSuggestionPress={handleSuggestionPress}
+								/>
+							</View>
+						</>
+					)}
+				</View>
 			</View>
 		</KeyboardAvoidingView>
 	)

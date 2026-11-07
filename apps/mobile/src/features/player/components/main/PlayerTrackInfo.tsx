@@ -3,7 +3,12 @@ import { Computed } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
-import { type ComponentProps, useEffect, useState } from 'react'
+import {
+	type ComponentProps,
+	useEffect,
+	useLayoutEffect,
+	useState,
+} from 'react'
 import type { ColorSchemeName } from 'react-native'
 import {
 	Pressable,
@@ -85,6 +90,10 @@ export function TrackInfo({
 	const animatedRotateStyle = useAnimatedStyle(() => ({
 		transform: [{ rotate: `${rotation.value}deg` }],
 	}))
+
+	useLayoutEffect(() => {
+		rotation.set(0)
+	}, [currentTrack?.uniqueKey, rotation])
 
 	useEffect(() => {
 		const shouldAnimate = Boolean(rotatePlayerCover && isPlaying)

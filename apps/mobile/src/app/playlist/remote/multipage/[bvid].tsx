@@ -76,8 +76,14 @@ export default function MultipagePage() {
 	const { colors } = theme
 	const linkedPlaylistId = useCheckLinkedToPlaylist(bv2av(bvid), 'multi_page')
 
-	const { selected, selectMode, toggle, enterSelectMode, setSelected } =
-		useTrackSelection()
+	const {
+		selected,
+		selectMode,
+		toggle,
+		enterSelectMode,
+		exitSelectMode,
+		setSelected,
+	} = useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -242,6 +248,15 @@ export default function MultipagePage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -288,9 +303,7 @@ export default function MultipagePage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

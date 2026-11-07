@@ -253,7 +253,7 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 		(item: BilibiliCommentItem) => {
 			if (!bvid) return
 			router.push({
-				pathname: '/comments/[bvid]/reply/[rpid]',
+				pathname: '/comments/reply',
 				params: { bvid, rpid: String(item.rpid) },
 			})
 		},

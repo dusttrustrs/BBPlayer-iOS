@@ -35,6 +35,7 @@ import { initPlayerQueueStore } from '@/hooks/stores/usePlayerQueueStore'
 import { usePlayerStore } from '@/hooks/stores/usePlayerStore'
 import { initializeSentry } from '@/lib/config/sentry'
 import drizzleDb from '@/lib/db/db'
+import { applyAppOrientation } from '@/lib/player/orientation'
 import { playerSideEffects } from '@/lib/player/PlayerSideEffects'
 import { analyticsService } from '@/lib/services/analyticsService'
 import lyricService from '@/lib/services/lyricService'
@@ -142,10 +143,17 @@ function runAppInit() {
 
 function RootLayout() {
 	const [isReady, setIsReady] = useState(false)
+	const enableIPadMode = useAppStoreObj(
+		(state) => state.settings.enableIPadMode ?? false,
+	)
 	const { success: migrationsSuccess, error: migrationsError } =
 		useFastMigrations(drizzleDb, migrations)
 	useCheckUpdate()
 	useFeatureTracking()
+
+	useEffect(() => {
+		applyAppOrientation(enableIPadMode)
+	}, [enableIPadMode])
 
 	onlineManager.setEventListener((setOnline) => {
 		void fetchNetInfo().then((state) => {

@@ -34,6 +34,9 @@ export default function AppearanceSettingsPage() {
 	)
 	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 	const setSettings = useAppStore((state) => state.setSettings)
+	const enableIPadMode = useAppStore(
+		(state) => state.settings.enableIPadMode ?? false,
+	)
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
 	)
@@ -114,13 +117,33 @@ export default function AppearanceSettingsPage() {
 				style={styles.scrollView}
 				contentContainerStyle={[
 					styles.scrollContent,
-					{ paddingBottom: insets.bottom + (haveTrack ? 70 + 20 : 20) },
+					{
+						paddingLeft: Math.max(insets.left, 0) + 25,
+						paddingRight: Math.max(insets.right, 0) + 25,
+						paddingBottom: insets.bottom + (haveTrack ? 70 + 20 : 20),
+					},
 				]}
 			>
 				<SettingsSectionTitle
 					title='显示'
 					first
 				/>
+				<View style={styles.settingRow}>
+					<View style={styles.settingTextContainer}>
+						<Text>iPad 模式</Text>
+						<Text
+							variant='bodySmall'
+							style={{ color: colors.onSurfaceVariant }}
+						>
+							针对 iPad 大屏与横屏显示优化，开启后全局任意界面均支持自由横屏切换
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={enableIPadMode}
+						onValueChange={(value) => setSettings({ enableIPadMode: value })}
+						testID='ipad-mode-switch'
+					/>
+				</View>
 				<View style={styles.settingRow}>
 					<View style={styles.settingTextContainer}>
 						<Text>纯白背景</Text>

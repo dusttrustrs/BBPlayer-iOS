@@ -148,7 +148,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 			],
 		},
 		plugins: [
-			'expo-widgets',
+			[
+				'expo-widgets',
+				{
+					frequentUpdates: true,
+					groupIdentifier: 'group.com.roitium.bbplayer',
+				},
+			],
 			'expo-screen-orientation',
 			'./expo-plugins/withProductionDebugSigning',
 			'./expo-plugins/withKotlinSerialization',
@@ -303,6 +309,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 		},
 		owner: 'roitium',
 		ios: {
+			supportsTablet: true,
+			requireFullScreen: false,
 			bundleIdentifier: 'com.roitium.bbplayer',
 			runtimeVersion: {
 				policy: 'appVersion',
@@ -311,6 +319,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 				googleServicesPlistPath,
 				googleServicesPlistRealPath,
 			),
+			infoPlist: {
+				UISupportedInterfaceOrientations: [
+					'UIInterfaceOrientationPortrait',
+					'UIInterfaceOrientationPortraitUpsideDown',
+					'UIInterfaceOrientationLandscapeLeft',
+					'UIInterfaceOrientationLandscapeRight',
+				],
+				'UISupportedInterfaceOrientations~ipad': [
+					'UIInterfaceOrientationPortrait',
+					'UIInterfaceOrientationPortraitUpsideDown',
+					'UIInterfaceOrientationLandscapeLeft',
+					'UIInterfaceOrientationLandscapeRight',
+				],
+			},
 		},
 		updates: {
 			enabled: true,

@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router'
 import { useCallback, useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
-import { Button, Divider, Text, useTheme } from 'react-native-paper'
+import { ScrollView, StyleSheet, View } from 'react-native'
+import { Appbar, Divider, Text, useTheme } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import UniversalSwitch from '@/components/common/UniversalSwitch'
@@ -91,29 +91,23 @@ export default function PerformanceScreen() {
 		<View
 			style={[styles.container, { backgroundColor: theme.colors.background }]}
 		>
-			<View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-				<Pressable onPress={() => router.back()}>
-					<Text style={{ color: theme.colors.primary }}>返回</Text>
-				</Pressable>
-				<Text
-					variant='titleMedium'
-					style={{ fontWeight: '600' }}
-				>
-					性能
-				</Text>
-				<Button
-					mode='text'
-					compact
+			<Appbar.Header>
+				<Appbar.BackAction onPress={() => router.back()} />
+				<Appbar.Content title='性能' />
+				<Appbar.Action
+					icon='refresh'
 					onPress={handleRefresh}
-				>
-					刷新
-				</Button>
-			</View>
+				/>
+			</Appbar.Header>
 
 			<ScrollView
 				contentContainerStyle={[
 					styles.scrollContent,
-					{ paddingBottom: insets.bottom + 40 },
+					{
+						paddingLeft: insets.left + 16,
+						paddingRight: insets.right + 16,
+						paddingBottom: insets.bottom + 40,
+					},
 				]}
 			>
 				<View style={styles.settingRow}>

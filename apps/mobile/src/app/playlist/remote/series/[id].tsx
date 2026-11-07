@@ -66,8 +66,14 @@ export default function SeriesPage() {
 	const [refreshing, setRefreshing] = useState(false)
 	const linkedPlaylistId = useCheckLinkedToPlaylist(Number(id), 'series')
 
-	const { selected, selectMode, toggle, enterSelectMode, setSelected } =
-		useTrackSelection()
+	const {
+		selected,
+		selectMode,
+		toggle,
+		enterSelectMode,
+		exitSelectMode,
+		setSelected,
+	} = useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -197,6 +203,15 @@ export default function SeriesPage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -240,9 +255,7 @@ export default function SeriesPage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

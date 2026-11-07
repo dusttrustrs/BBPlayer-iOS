@@ -71,7 +71,16 @@ export default function MyPage() {
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
 			<SkinAppbarBackground height={insets.top + 100} />
-			<View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+			<View
+				style={[
+					styles.header,
+					{
+						paddingTop: insets.top + 8,
+						paddingLeft: insets.left + 16,
+						paddingRight: insets.right + 16,
+					},
+				]}
+			>
 				<Text
 					variant='headlineSmall'
 					style={[styles.bold, { color: headerForegroundColor }]}
@@ -98,7 +107,11 @@ export default function MyPage() {
 			<ScrollView
 				contentContainerStyle={[
 					styles.content,
-					{ paddingBottom: haveTrack ? 86 : 24 },
+					{
+						paddingLeft: insets.left + 16,
+						paddingRight: insets.right + 16,
+						paddingBottom: haveTrack ? 86 : 24,
+					},
 				]}
 				showsVerticalScrollIndicator={false}
 			>

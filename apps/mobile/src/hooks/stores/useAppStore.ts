@@ -8,6 +8,7 @@ import { immer } from 'zustand/middleware/immer'
 
 import { alert } from '@/components/modals/AlertModal'
 import { expoDb } from '@/lib/db/db'
+import { applyAppOrientation } from '@/lib/player/orientation'
 import { analyticsService } from '@/lib/services/analyticsService'
 import type { AppState, Settings } from '@/types/core/appStore'
 import type { StorageKey } from '@/types/storage'
@@ -144,6 +145,7 @@ export const useAppStore = create<AppState>()(
 					hideStarPrompt: false,
 					enableSwipeToOpenComments: true,
 					enableSwipeToSwitchTrack: true,
+					enableIPadMode: false,
 				},
 				bilibiliUserInfo: null,
 				bbplayerAccount: null,
@@ -233,6 +235,9 @@ export const useAppStore = create<AppState>()(
 						void Orpheus.setAllowSimultaneousPlayback(
 							updates.allowSimultaneousPlayback,
 						)
+					}
+					if (updates.enableIPadMode !== undefined) {
+						applyAppOrientation(updates.enableIPadMode)
 					}
 				},
 

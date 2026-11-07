@@ -71,6 +71,8 @@ export default function Library() {
 					paddingBottom: 0,
 					flex: 1,
 					paddingTop: insets.top + 8,
+					paddingLeft: insets.left,
+					paddingRight: insets.right,
 				}}
 			>
 				<View style={[styles.header]}>

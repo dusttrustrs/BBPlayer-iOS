@@ -15,6 +15,7 @@ import Animated, {
 	useSharedValue,
 	useDerivedValue,
 } from 'react-native-reanimated'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
@@ -42,9 +43,14 @@ const Lyrics = memo(function Lyrics({
 	currentIndex: number
 	onPressBackground?: () => void
 }) {
+	const insets = useSafeAreaInsets()
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
+	const portraitBottomMaskHeight = Math.max(
+		insets.bottom + 196,
+		LYRICS_CONTROLS_OVERLAY_HEIGHT,
+	)
 	const colors = useTheme().colors
 	const scrollViewRef = useRef<Animated.ScrollView>(null)
 	const itemLayoutsRef = useRef<{ [index: number]: number }>({})
@@ -256,7 +262,10 @@ const Lyrics = memo(function Lyrics({
 						styles.rawLyricsScrollViewContainer,
 						{
 							paddingTop: windowHeight * 0.05,
-							paddingBottom: windowHeight * 0.5,
+							paddingBottom: Math.max(
+								windowHeight * 0.52,
+								portraitBottomMaskHeight + 64,
+							),
 						},
 					]}
 					scrollEventThrottle={16}
@@ -292,7 +301,14 @@ const Lyrics = memo(function Lyrics({
 							return (
 								<Pressable
 									key='padding_item'
-									style={{ height: isLandscape ? 80 : windowHeight * 0.44 }}
+									style={{
+										height: isLandscape
+											? 80
+											: Math.max(
+													windowHeight * 0.52,
+													portraitBottomMaskHeight + 64,
+												),
+									}}
 									onPress={onPressBackground}
 								/>
 							)
@@ -369,7 +385,7 @@ const Lyrics = memo(function Lyrics({
 								style={[
 									styles.gradient,
 									!isLandscape && {
-										height: LYRICS_CONTROLS_OVERLAY_HEIGHT,
+										height: portraitBottomMaskHeight,
 									},
 								]}
 								start={{ x: 0, y: 0 }}
@@ -377,7 +393,7 @@ const Lyrics = memo(function Lyrics({
 								colors={[colors.background, 'transparent']}
 								locations={[
 									0,
-									!isLandscape ? 60 / LYRICS_CONTROLS_OVERLAY_HEIGHT : 1,
+									!isLandscape ? 64 / portraitBottomMaskHeight : 1,
 								]}
 							/>
 						</View>

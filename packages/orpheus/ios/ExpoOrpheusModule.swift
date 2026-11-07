@@ -1,5 +1,223 @@
 import ExpoModulesCore
 import MMKV
+import UIKit
+
+private final class LiveActivityCoverHelper: @unchecked Sendable {
+    static let shared = LiveActivityCoverHelper()
+
+    private let lock = NSLock()
+    private var cache: [String: [String: String]] = [:]
+    private var cacheOrder: [String] = []
+    private let workQueue = DispatchQueue(label: "com.bbplayer.orpheus.livecover", qos: .userInitiated)
+
+    private init() {}
+
+    func prepareCover(rawUrl: String, completion: @escaping ([String: String]) -> Void) {
+        let trimmed = rawUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion([:])
+            return
+        }
+
+        let normalized: String
+        if trimmed.hasPrefix("//") {
+            normalized = "https:" + trimmed
+        } else if trimmed.hasPrefix("http://") {
+            normalized = "https://" + String(trimmed.dropFirst("http://".count))
+        } else {
+            normalized = trimmed
+        }
+
+        lock.lock()
+        if let hit = cache[normalized] {
+            let pathOk: Bool
+            if let cp = hit["coverPath"], !cp.isEmpty {
+                pathOk = FileManager.default.fileExists(atPath: cp)
+            } else {
+                pathOk = true
+            }
+            if pathOk && !(hit["coverBase64"] ?? "").isEmpty {
+                lock.unlock()
+                completion(hit)
+                return
+            }
+        }
+        lock.unlock()
+
+        workQueue.async { [weak self] in
+            guard let self = self else {
+                completion([:])
+                return
+            }
+            self.loadImageData(for: normalized) { data in
+                guard let data = data, let sourceImage = UIImage(data: data) else {
+                    completion([:])
+                    return
+                }
+                let encoded = self.encodeCoverOutputs(sourceImage: sourceImage, cacheKey: normalized)
+                if !encoded.isEmpty {
+                    self.lock.lock()
+                    if self.cache[normalized] == nil {
+                        self.cacheOrder.append(normalized)
+                        if self.cacheOrder.count > 24 {
+                            let evicted = self.cacheOrder.removeFirst()
+                            self.cache.removeValue(forKey: evicted)
+                        }
+                    }
+                    self.cache[normalized] = encoded
+                    self.lock.unlock()
+                }
+                completion(encoded)
+            }
+        }
+    }
+
+    private func loadImageData(for urlString: String, completion: @escaping (Data?) -> Void) {
+        if urlString.hasPrefix("file://") {
+            if let fileUrl = URL(string: urlString), let data = try? Data(contentsOf: fileUrl), !data.isEmpty {
+                completion(data)
+                return
+            }
+            let rawPath = String(urlString.dropFirst("file://".count))
+            let decoded = rawPath.removingPercentEncoding ?? rawPath
+            completion(try? Data(contentsOf: URL(fileURLWithPath: decoded)))
+            return
+        }
+        if urlString.hasPrefix("/") {
+            completion(try? Data(contentsOf: URL(fileURLWithPath: urlString)))
+            return
+        }
+
+        var candidates: [String] = []
+        if urlString.contains("hdslb.com") && !urlString.contains("@") && !urlString.contains("?") {
+            candidates.append(urlString + "@240w_240h_1c.jpg")
+        }
+        candidates.append(urlString)
+
+        fetchFirstValidCandidate(candidates, index: 0, completion: completion)
+    }
+
+    private func fetchFirstValidCandidate(_ candidates: [String], index: Int, completion: @escaping (Data?) -> Void) {
+        guard index < candidates.count else {
+            completion(nil)
+            return
+        }
+        guard let url = URL(string: candidates[index]) else {
+            fetchFirstValidCandidate(candidates, index: index + 1, completion: completion)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            let statusOk = (response as? HTTPURLResponse).map { (200...299).contains($0.statusCode) } ?? true
+            if statusOk, let data = data, !data.isEmpty, UIImage(data: data) != nil {
+                completion(data)
+            } else if let self = self {
+                self.fetchFirstValidCandidate(candidates, index: index + 1, completion: completion)
+            } else {
+                completion(nil)
+            }
+        }.resume()
+    }
+
+    private func encodeCoverOutputs(sourceImage: UIImage, cacheKey: String) -> [String: String] {
+        var result: [String: String] = [:]
+
+        if let groupDir = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.com.roitium.bbplayer"
+        ) {
+            let coversDir = groupDir.appendingPathComponent("live_covers", isDirectory: true)
+            try? FileManager.default.createDirectory(at: coversDir, withIntermediateDirectories: true)
+            let hashHex = Self.fnv1aHex(cacheKey)
+            let fileUrl = coversDir.appendingPathComponent("live_cover_\(hashHex).jpg")
+            let hiRes = Self.renderSquareImage(sourceImage, side: 160)
+            if let jpeg = hiRes.jpegData(compressionQuality: 0.78) {
+                if (try? jpeg.write(to: fileUrl, options: .atomic)) != nil {
+                    result["coverPath"] = fileUrl.path
+                    Self.pruneOldCovers(in: coversDir, keepCount: 8)
+                }
+            }
+        }
+
+        let attempts: [(CGFloat, CGFloat)] = [
+            (60, 0.58),
+            (60, 0.46),
+            (54, 0.45),
+            (48, 0.44),
+            (42, 0.38)
+        ]
+        for (side, quality) in attempts {
+            let thumb = Self.renderSquareImage(sourceImage, side: side)
+            if let jpeg = thumb.jpegData(compressionQuality: quality) {
+                let b64 = jpeg.base64EncodedString()
+                if b64.utf8.count <= 2100 {
+                    result["coverBase64"] = b64
+                    break
+                }
+            }
+        }
+
+        return result
+    }
+
+    private static func renderSquareImage(_ source: UIImage, side: CGFloat) -> UIImage {
+        let targetSize = CGSize(width: side, height: side)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1.0
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        return renderer.image { _ in
+            UIColor(white: 0.14, alpha: 1.0).setFill()
+            UIRectFill(CGRect(origin: .zero, size: targetSize))
+            let srcSize = source.size
+            guard srcSize.width > 0, srcSize.height > 0 else { return }
+            let scale = max(side / srcSize.width, side / srcSize.height)
+            let drawW = srcSize.width * scale
+            let drawH = srcSize.height * scale
+            let drawRect = CGRect(
+                x: (side - drawW) * 0.5,
+                y: (side - drawH) * 0.5,
+                width: drawW,
+                height: drawH
+            )
+            source.draw(in: drawRect)
+        }
+    }
+
+    private static func fnv1aHex(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
+    }
+
+    private static func pruneOldCovers(in directory: URL, keepCount: Int) {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ), urls.count > keepCount else {
+            return
+        }
+        let sorted = urls.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return da > db
+        }
+        for stale in sorted.dropFirst(keepCount) {
+            try? FileManager.default.removeItem(at: stale)
+        }
+    }
+}
 
 public class ExpoOrpheusModule: Module {
 
@@ -324,6 +542,12 @@ public class ExpoOrpheusModule: Module {
 
     AsyncFunction("setStatusBarLyricsInternal") { (lyricsJson: String) in
         throw NSError(domain: "Orpheus", code: 1, userInfo: [NSLocalizedDescriptionKey: "Platform not supported"])
+    }
+
+    AsyncFunction("prepareLiveActivityCover") { (coverUrl: String, promise: Promise) in
+        LiveActivityCoverHelper.shared.prepareCover(rawUrl: coverUrl) { result in
+            promise.resolve(result)
+        }
     }
 
     AsyncFunction("debugTriggerError") {

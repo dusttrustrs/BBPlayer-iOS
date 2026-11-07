@@ -238,6 +238,15 @@ export default function UploaderPage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -246,7 +255,6 @@ export default function UploaderPage() {
 					}
 					onPress={handleDoubleTap}
 				/>
-				<Appbar.BackAction onPress={() => router.back()} />
 				{selectMode ? (
 					<>
 						<Appbar.Action

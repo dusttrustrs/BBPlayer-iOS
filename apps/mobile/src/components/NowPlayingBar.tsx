@@ -9,7 +9,7 @@ import { useValue } from '@legendapp/state/react'
 import { Image } from 'expo-image'
 import { useRouter, useSegments } from 'expo-router'
 import { memo, useEffect, useLayoutEffect, useRef } from 'react'
-import { Platform, StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { EaseView } from 'react-native-ease'
 import {
 	Directions,
@@ -123,6 +123,7 @@ const NowPlayingBarContent = memo(function NowPlayingBarContent() {
 	const currentTrack = useCurrentTrack()
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
+	const { width: windowWidth } = useWindowDimensions()
 	const isVisible = currentTrack !== null
 	const segments = useSegments()
 	const backgroundColor = useValue(nowPlayingBarStore$.backgroundColor)
@@ -248,6 +249,13 @@ const NowPlayingBarContent = memo(function NowPlayingBarContent() {
 			? [styles.nowPlayingBarBottom]
 			: [styles.nowPlayingBarFloat]
 
+	const isFloatingWide =
+		nowPlayingBarStyle !== 'bottom' &&
+		windowWidth - insets.left - insets.right >= 720
+	const floatingWideWidth = isFloatingWide
+		? Math.min(windowWidth - insets.left - insets.right - 40, 640)
+		: undefined
+
 	// 根级覆盖层使用原生 Tab 栏的完整高度，安全区只补一次。
 	const isDocked = nowPlayingBarStyle === 'bottom' && Platform.OS !== 'ios'
 	const bottomMargin = isDocked
@@ -276,6 +284,22 @@ const NowPlayingBarContent = memo(function NowPlayingBarContent() {
 					<View
 						style={[
 							playerStyle,
+							nowPlayingBarStyle !== 'bottom' &&
+								(isFloatingWide
+									? {
+											width: floatingWideWidth,
+											flex: 0,
+											alignSelf: 'center',
+											marginHorizontal: 0,
+										}
+									: {
+											marginLeft: insets.left + 20,
+											marginRight: insets.right + 20,
+										}),
+							nowPlayingBarStyle === 'bottom' && {
+								paddingLeft: insets.left + 20,
+								paddingRight: insets.right + 20,
+							},
 							{
 								backgroundColor: pureWhiteBackground
 									? colors.background

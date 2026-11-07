@@ -19,6 +19,7 @@ interface Settings {
 	enableWavyProgressBar?: boolean
 	enableSwipeToOpenComments?: boolean
 	enableSwipeToSwitchTrack?: boolean
+	enableIPadMode?: boolean
 }
 
 interface BilibiliUserSummary {

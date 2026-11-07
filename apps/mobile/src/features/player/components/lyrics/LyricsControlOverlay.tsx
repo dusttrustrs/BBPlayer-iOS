@@ -83,8 +83,8 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 		return null
 	}
 
-	const paddingBottom = Math.max(insets.bottom + 8, 16)
-	const overlayHeight = 185 + paddingBottom
+	const paddingBottom = Math.max(insets.bottom - 14, 8)
+	const overlayHeight = 165 + paddingBottom
 
 	return (
 		<View
@@ -134,19 +134,19 @@ const styles = StyleSheet.create({
 	},
 	playerControls: {
 		width: '100%',
-		paddingTop: 10,
+		paddingTop: 4,
 	},
 	actionMenuRow: {
 		flexDirection: 'row',
 		justifyContent: 'flex-end',
 		paddingHorizontal: 16,
-		marginBottom: 2,
+		marginBottom: 0,
 	},
 	actionMenuButton: {
 		borderRadius: 99999,
-		padding: 8,
+		padding: 6,
 	},
 	playbackButtonsWrapper: {
-		marginTop: 4,
+		marginTop: 0,
 	},
 })

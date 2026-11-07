@@ -63,7 +63,8 @@ export default function FavoritePage() {
 	const [refreshing, setRefreshing] = useState(false)
 	const linkedPlaylistId = useCheckLinkedToPlaylist(Number(id), 'favorite')
 
-	const { selected, selectMode, toggle, enterSelectMode } = useTrackSelection()
+	const { selected, selectMode, toggle, enterSelectMode, exitSelectMode } =
+		useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -176,6 +177,15 @@ export default function FavoritePage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -205,9 +215,7 @@ export default function FavoritePage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

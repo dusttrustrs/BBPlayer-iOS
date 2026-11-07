@@ -57,7 +57,8 @@ export default function SearchResultsPage() {
 	const { query } = useLocalSearchParams<{ query: string }>()
 	const router = useRouter()
 
-	const { selected, selectMode, toggle, enterSelectMode } = useTrackSelection()
+	const { selected, selectMode, toggle, enterSelectMode, exitSelectMode } =
+		useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -120,6 +121,15 @@ export default function SearchResultsPage() {
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
 			<Appbar.Header elevated>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -149,9 +159,7 @@ export default function SearchResultsPage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

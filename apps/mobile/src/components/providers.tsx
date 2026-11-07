@@ -30,7 +30,10 @@ import {
 	buildMaterial3PaperColors,
 	buildPureWhitePaperColors,
 } from '@/lib/theme/material3Colors'
+import { installPaperAppbarPatch } from '@/lib/ui/patchPaperAppbar'
 import { storage } from '@/utils/mmkv'
+
+installPaperAppbarPatch()
 
 function DevTools() {
 	useTanStackQueryDevTools(queryClient)

@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
+import { LandscapePlayer } from '@/features/player/components/main/LandscapePlayer'
 import { PlayerChaptersSheet } from '@/features/player/components/main/PlayerChaptersSheet'
 import { PlayerHeader } from '@/features/player/components/main/PlayerHeader'
 import PlayerMainTab from '@/features/player/components/main/PlayerMainTab'
@@ -47,6 +48,7 @@ import useAppStore from '@/hooks/stores/useAppStore'
 import { usePlayerChaptersSheetStore } from '@/hooks/stores/usePlayerChaptersSheetStore'
 import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
+import { enterPlayerOrientationScope } from '@/lib/player/orientation'
 import { resolveBilibiliImageUrl, resolveTrackCover } from '@/utils/imageUrl'
 import log, { reportErrorToSentry } from '@/utils/log'
 
@@ -93,15 +95,10 @@ export default function PlayerPage() {
 		markInteractive()
 	}, [markInteractive])
 
-	// 只有播放页允许横屏，离开时锁回竖屏
+	// 进入播放页允许自由旋转；退出时若未开启 iPad 模式则锁回竖屏（expo-screen-orientation）
 	useEffect(() => {
-		if (Platform.OS !== 'ios') return
-		void ScreenOrientation.unlockAsync().catch(() => void 0)
-		return () => {
-			void ScreenOrientation.lockAsync(
-				ScreenOrientation.OrientationLock.PORTRAIT_UP,
-			).catch(() => void 0)
-		}
+		void ScreenOrientation.getOrientationLockAsync().catch(() => void 0)
+		return enterPlayerOrientationScope()
 	}, [])
 	const currentTrackCover = resolveBilibiliImageUrl(
 		currentTrack
@@ -393,50 +390,61 @@ export default function PlayerPage() {
 								scrollX={scrollX}
 							/>
 						</Computed>
-						<Computed>
-							<AnimatedPagerView
-								key={
-									playbackContextStore$.context.mode.get() === 'podcast'
-										? 'podcast'
-										: 'music'
-								}
-								scrollEnabled={
-									playbackContextStore$.context.mode.get() !== 'podcast' &&
-									!playerSliderDragging$.get()
-								}
-								ref={pagerRef}
-								style={styles.tabView}
-								initialPage={0}
+						{width > height ? (
+							<LandscapePlayer
+								pagerRef={pagerRef}
+								index={index}
+								setIndex={setIndex}
+								jumpTo={jumpTo}
+								imageRef={coverRef}
 								onPageScroll={pageScrollHandler}
-								onPageSelected={(e) => setIndex(e.nativeEvent.position)}
-							>
-								{[
-									<View
-										key='main'
-										style={styles.tabView}
-									>
-										<PlayerMainTab
-											jumpTo={jumpTo}
-											imageRef={coverRef}
-											onPresent={() => {}}
-										/>
-									</View>,
-									...(playbackContextStore$.context.mode.get() === 'podcast'
-										? []
-										: [
-												<View
-													key='lyrics'
-													style={styles.tabView}
-												>
-													<Lyrics
-														currentIndex={index}
-														onPressBackground={() => jumpTo('main')}
-													/>
-												</View>,
-											]),
-								]}
-							</AnimatedPagerView>
-						</Computed>
+							/>
+						) : (
+							<Computed>
+								<AnimatedPagerView
+									key={
+										playbackContextStore$.context.mode.get() === 'podcast'
+											? 'podcast'
+											: 'music'
+									}
+									scrollEnabled={
+										playbackContextStore$.context.mode.get() !== 'podcast' &&
+										!playerSliderDragging$.get()
+									}
+									ref={pagerRef}
+									style={styles.tabView}
+									initialPage={0}
+									onPageScroll={pageScrollHandler}
+									onPageSelected={(e) => setIndex(e.nativeEvent.position)}
+								>
+									{[
+										<View
+											key='main'
+											style={styles.tabView}
+										>
+											<PlayerMainTab
+												jumpTo={jumpTo}
+												imageRef={coverRef}
+												onPresent={() => {}}
+											/>
+										</View>,
+										...(playbackContextStore$.context.mode.get() === 'podcast'
+											? []
+											: [
+													<View
+														key='lyrics'
+														style={styles.tabView}
+													>
+														<Lyrics
+															currentIndex={index}
+															onPressBackground={() => jumpTo('main')}
+														/>
+													</View>,
+												]),
+									]}
+								</AnimatedPagerView>
+							</Computed>
+						)}
 					</View>
 
 					<PlayerChaptersSheet />

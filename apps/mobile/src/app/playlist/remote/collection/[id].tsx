@@ -62,8 +62,14 @@ export default function CollectionPage() {
 	const [refreshing, setRefreshing] = useState(false)
 	const linkedPlaylistId = useCheckLinkedToPlaylist(Number(id), 'collection')
 
-	const { selected, selectMode, toggle, enterSelectMode, setSelected } =
-		useTrackSelection()
+	const {
+		selected,
+		selectMode,
+		toggle,
+		enterSelectMode,
+		exitSelectMode,
+		setSelected,
+	} = useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -160,6 +166,15 @@ export default function CollectionPage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode
@@ -203,9 +218,7 @@ export default function CollectionPage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 			</Appbar.Header>
 
 			<View style={styles.listContainer}>

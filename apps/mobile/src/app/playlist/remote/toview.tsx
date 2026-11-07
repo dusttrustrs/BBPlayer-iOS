@@ -88,8 +88,14 @@ export default function ToViewPage() {
 		secondaryButtonIconColor,
 	} = usePlaylistBackgroundColor(coverRef, theme.dark, colors.background)
 
-	const { selected, selectMode, toggle, enterSelectMode, setSelected } =
-		useTrackSelection()
+	const {
+		selected,
+		selectMode,
+		toggle,
+		enterSelectMode,
+		exitSelectMode,
+		setSelected,
+	} = useTrackSelection()
 	const selection = useMemo(
 		() => ({
 			active: selectMode,
@@ -211,6 +217,15 @@ export default function ToViewPage() {
 				elevated
 				style={{ backgroundColor: 'transparent' }}
 			>
+				<Appbar.BackAction
+					onPress={() => {
+						if (selectMode) {
+							exitSelectMode()
+						} else {
+							router.back()
+						}
+					}}
+				/>
 				<Appbar.Content
 					title={
 						selectMode ? `已选择\u2009${selected.size}\u2009首` : '稍后再看'
@@ -255,9 +270,7 @@ export default function ToViewPage() {
 							}}
 						/>
 					</>
-				) : (
-					<Appbar.BackAction onPress={() => router.back()} />
-				)}
+				) : null}
 				<MenuView {...menuActions}>
 					<Appbar.Action icon='dots-vertical' />
 				</MenuView>
