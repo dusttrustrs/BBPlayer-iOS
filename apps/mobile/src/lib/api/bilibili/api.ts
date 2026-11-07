@@ -132,10 +132,7 @@ export class BilibiliApi {
 					const arr = list[year]
 					if (Array.isArray(arr)) {
 						for (const item of arr) {
-							if (
-								!latest ||
-								item.publish_time > latest.publish_time
-							) {
+							if (!latest || item.publish_time > latest.publish_time) {
 								latest = item
 							}
 						}

@@ -239,7 +239,7 @@ export const RecommendListComponent = memo(function RecommendListComponent() {
 				ListHeaderComponent={ListHeaderComponent}
 				showsVerticalScrollIndicator={false}
 				contentContainerStyle={{
-					paddingBottom: haveTrack ? 90 : 16,
+					paddingBottom: haveTrack ? 165 : 80,
 				}}
 				refreshControl={
 					<RefreshControl

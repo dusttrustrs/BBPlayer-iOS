@@ -173,7 +173,7 @@ const LocalPlaylistListComponent = memo(() => {
 				}}
 			>
 				<LegendList
-					contentContainerStyle={{ paddingBottom: haveTrack ? 90 : 10 }}
+					contentContainerStyle={{ paddingBottom: haveTrack ? 165 : 80 }}
 					showsVerticalScrollIndicator={false}
 					data={finalPlaylists ?? []}
 					renderItem={renderPlaylistItem}

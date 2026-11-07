@@ -1,21 +1,25 @@
+import { Orpheus } from '@bbplayer/orpheus'
 import { Show } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
-import { ScrollView } from 'react-native-gesture-handler'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
 	Easing,
 	useAnimatedStyle,
 	useSharedValue,
+	withSpring,
 	withTiming,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { scheduleOnRN } from 'react-native-worklets'
 
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
+import { analyticsService } from '@/lib/services/analyticsService'
 import * as Haptics from '@/utils/haptics'
 
 import { PlayerSlider } from './PlayerSlider'
@@ -26,6 +30,8 @@ interface PlayerMainTabProps {
 	imageRef: ImageRef | null
 	onPresent: () => void
 }
+
+let lastPlayerSkipTime = 0
 
 const PlayerMainTab = memo(function PlayerMainTab({
 	jumpTo,
@@ -38,6 +44,62 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
 	const [isDraggingSlider, setIsDraggingSlider] = useState(false)
+
+	const handleSkipNext = useCallback(() => {
+		const now = Date.now()
+		if (now - lastPlayerSkipTime < 450) return
+		lastPlayerSkipTime = now
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		void Orpheus.skipToNext()
+		void analyticsService.logPlayerAction('skip_next')
+	}, [])
+
+	const handleSkipPrevious = useCallback(() => {
+		const now = Date.now()
+		if (now - lastPlayerSkipTime < 450) return
+		lastPlayerSkipTime = now
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		void Orpheus.skipToPrevious()
+		void analyticsService.logPlayerAction('skip_prev')
+	}, [])
+
+	const swipeTranslateY = useSharedValue(0)
+
+	const swipeAnimatedStyle = useAnimatedStyle(() => ({
+		transform: [{ translateY: swipeTranslateY.value }],
+	}))
+
+	const panGesture = useMemo(() => {
+		return Gesture.Pan()
+			.enabled(!isDraggingSlider)
+			.activeOffsetY([-25, 25])
+			.failOffsetX([-25, 25])
+			.onUpdate((e) => {
+				'worklet'
+				swipeTranslateY.set(e.translationY * 0.35)
+			})
+			.onEnd((e) => {
+				'worklet'
+				const threshold = 60
+				const velocityThreshold = 500
+				if (
+					e.translationY < -threshold ||
+					(e.translationY < -20 && e.velocityY < -velocityThreshold)
+				) {
+					scheduleOnRN(handleSkipNext)
+				} else if (
+					e.translationY > threshold ||
+					(e.translationY > 20 && e.velocityY > velocityThreshold)
+				) {
+					scheduleOnRN(handleSkipPrevious)
+				}
+				swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
+			})
+			.onFinalize(() => {
+				'worklet'
+				swipeTranslateY.set(withSpring(0, { damping: 16, stiffness: 160 }))
+			})
+	}, [isDraggingSlider, handleSkipNext, handleSkipPrevious, swipeTranslateY])
 
 	// 0 = 刚旋转完（元素还在「旧位置」），1 = 各就各位；每次方向变化重播一遍编排
 	const p = useSharedValue(1)
@@ -72,7 +134,10 @@ const PlayerMainTab = memo(function PlayerMainTab({
 		const t = delayed(110)
 		return {
 			opacity: 0.3 + 0.7 * t,
-			transform: [{ translateX: dir * 60 * (1 - t) }, { scaleX: 0.85 + 0.15 * t }],
+			transform: [
+				{ translateX: dir * 60 * (1 - t) },
+				{ scaleX: 0.85 + 0.15 * t },
+			],
 		}
 	})
 	const controlsStyle = useAnimatedStyle(() => {
@@ -91,20 +156,22 @@ const PlayerMainTab = memo(function PlayerMainTab({
 		return (
 			<Show if={playbackContextStore$.ready}>
 				<View style={[styles.landscapeRow, { paddingHorizontal: padH }]}>
-					<Animated.View style={[styles.landscapeLeft, coverStyle]}>
-						<TrackInfo
-							part='cover'
-							coverMaxSize={coverSize}
-							onArtistPress={() => void 0}
-							onPressCover={() => {
-								void Haptics.performHaptics(
-									Haptics.AndroidHaptics.Context_Click,
-								)
-								jumpTo('lyrics')
-							}}
-							coverRef={imageRef}
-						/>
-					</Animated.View>
+					<GestureDetector gesture={panGesture}>
+						<Animated.View style={[styles.landscapeLeft, coverStyle]}>
+							<TrackInfo
+								part='cover'
+								coverMaxSize={coverSize}
+								onArtistPress={() => void 0}
+								onPressCover={() => {
+									void Haptics.performHaptics(
+										Haptics.AndroidHaptics.Context_Click,
+									)
+									jumpTo('lyrics')
+								}}
+								coverRef={imageRef}
+							/>
+						</Animated.View>
+					</GestureDetector>
 					<View style={styles.landscapeRight}>
 						<Animated.View style={infoStyle}>
 							<TrackInfo
@@ -139,49 +206,47 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	}
 	return (
 		<Show if={playbackContextStore$.ready}>
-			<ScrollView
-				scrollEnabled={!isDraggingSlider}
-				contentContainerStyle={styles.container}
-				showsVerticalScrollIndicator={false}
-			>
-				<TrackInfo
-					onArtistPress={() =>
-						currentTrack.artist?.remoteId
-							? router.navigate({
-									pathname: '/playlist/remote/uploader/[mid]',
-									params: { mid: currentTrack.artist?.remoteId },
-								})
-							: void 0
-					}
-					onPressCover={() => {
-						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-						jumpTo('lyrics')
-					}}
-					coverRef={imageRef}
-				/>
-
-				<View
-					style={[
-						{ paddingBottom: Math.max(insets.bottom + 20, 20) },
-						styles.controlsContainer,
-					]}
-				>
-					<PlayerSlider onDragStateChange={setIsDraggingSlider} />
-					<PlayerControls
-						onOpenQueue={() => {
-							onPresent()
-							void usePlayerQueueSheetStore.getState().open()
+			<GestureDetector gesture={panGesture}>
+				<Animated.View style={[styles.container, swipeAnimatedStyle]}>
+					<TrackInfo
+						onArtistPress={() =>
+							currentTrack.artist?.remoteId
+								? router.navigate({
+										pathname: '/playlist/remote/uploader/[mid]',
+										params: { mid: currentTrack.artist?.remoteId },
+									})
+								: void 0
+						}
+						onPressCover={() => {
+							void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+							jumpTo('lyrics')
 						}}
+						coverRef={imageRef}
 					/>
-				</View>
-			</ScrollView>
+
+					<View
+						style={[
+							{ paddingBottom: Math.max(insets.bottom + 20, 20) },
+							styles.controlsContainer,
+						]}
+					>
+						<PlayerSlider onDragStateChange={setIsDraggingSlider} />
+						<PlayerControls
+							onOpenQueue={() => {
+								onPresent()
+								void usePlayerQueueSheetStore.getState().open()
+							}}
+						/>
+					</View>
+				</Animated.View>
+			</GestureDetector>
 		</Show>
 	)
 })
 
 const styles = StyleSheet.create({
 	container: {
-		flexGrow: 1,
+		flex: 1,
 		justifyContent: 'space-between',
 	},
 	controlsContainer: {
