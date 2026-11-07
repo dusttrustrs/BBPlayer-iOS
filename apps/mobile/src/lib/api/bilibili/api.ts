@@ -41,6 +41,9 @@ import {
 	type BilibiliFollowingGroup,
 	type BilibiliUserUploadedVideosResponse,
 	type BilibiliVideoDetails,
+	type BilibiliHotSong,
+	type BilibiliHotSongsResponse,
+	type BilibiliMusicFeedItem,
 } from '@/types/apis/bilibili'
 import type { BilibiliTrack } from '@/types/core/media'
 import log from '@/utils/log'
@@ -93,6 +96,93 @@ export class BilibiliApi {
 				signal,
 			})
 			.map((response) => response?.list ?? [])
+	}
+
+	/**
+	 * 获取版权音乐榜（热歌榜等）
+	 */
+	getHotSongsToplist({
+		listType = 1,
+		signal,
+	}: {
+		listType?: number
+		signal?: AbortSignal
+	} = {}): ResultAsync<BilibiliHotSongsResponse, BilibiliApiError> {
+		return bilibiliApiClient
+			.get<{
+				list: Record<
+					string,
+					{ ID: number; priod: number; publish_time: number }[]
+				>
+			}>({
+				endpoint: `/x/copyright-music-publicity/toplist/all_period?list_type=${listType}`,
+				signal,
+			})
+			.andThen((periods) => {
+				const list = periods?.list
+				if (!list || typeof list !== 'object') {
+					return okAsync({ list: [], list_id: 0 })
+				}
+				let latest: {
+					ID: number
+					priod: number
+					publish_time: number
+				} | null = null
+				for (const year of Object.keys(list)) {
+					const arr = list[year]
+					if (Array.isArray(arr)) {
+						for (const item of arr) {
+							if (
+								!latest ||
+								item.publish_time > latest.publish_time
+							) {
+								latest = item
+							}
+						}
+					}
+				}
+				if (!latest || !latest.ID) {
+					return okAsync({ list: [], list_id: 0 })
+				}
+				const latestItem = latest
+				return bilibiliApiClient
+					.get<{
+						list: BilibiliHotSong[]
+						list_id: number
+					}>({
+						endpoint: `/x/copyright-music-publicity/toplist/music_list?list_id=${latestItem.ID}`,
+						signal,
+					})
+					.map((res) => ({
+						list: (res?.list ?? []).sort((a, b) => a.rank - b.rank),
+						list_id: latestItem.ID,
+						period: latestItem.priod,
+						published_at: latestItem.publish_time,
+					}))
+			})
+	}
+
+	/**
+	 * 获取音乐区推荐流
+	 */
+	getMusicRegionFeed({
+		page = 1,
+		count = 20,
+		signal,
+	}: {
+		page?: number
+		count?: number
+		signal?: AbortSignal
+	} = {}): ResultAsync<BilibiliMusicFeedItem[], BilibiliApiError> {
+		const requestCnt = Math.min(Math.max(count, 1), 20)
+		return bilibiliApiClient
+			.get<{
+				archives: BilibiliMusicFeedItem[]
+			} | null>({
+				endpoint: `/x/web-interface/region/feed/rcmd?from_region=1003&display_id=${page}&request_cnt=${requestCnt}&device=web&plat=30`,
+				signal,
+			})
+			.map((response) => response?.archives ?? [])
 	}
 
 	/**

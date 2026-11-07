@@ -11,7 +11,7 @@ import SkinAppbarBackground from '@/components/navigation/SkinAppbarBackground'
 import CollectionListComponent from '@/features/library/collection/CollectionList'
 import FavoriteFolderListComponent from '@/features/library/favorite/FavoriteFolderList'
 import LocalPlaylistListComponent from '@/features/library/local/LocalPlaylistList'
-import MultiPageVideosListComponent from '@/features/library/multipage/MultiPageVideosList'
+import RecommendListComponent from '@/features/library/recommend/RecommendList'
 import useSkinForegroundColor from '@/hooks/theme/useSkinForegroundColor'
 import { useNowPlayingBar } from '@/hooks/ui/useNowPlayingBar'
 import { markPerfInteractive } from '@/lib/performance'
@@ -20,21 +20,21 @@ const renderScene = SceneMap({
 	local: LocalPlaylistListComponent,
 	favorite: FavoriteFolderListComponent,
 	collection: CollectionListComponent,
-	multiPage: MultiPageVideosListComponent,
+	recommend: RecommendListComponent,
 })
 
 const routes = [
 	{ key: 'local', title: '播放列表' },
 	{ key: 'favorite', title: '收藏夹' },
 	{ key: 'collection', title: '合集' },
-	{ key: 'multiPage', title: '分 p' },
+	{ key: 'recommend', title: '推荐' },
 ]
 
 export enum Tabs {
 	Local = 0,
 	Favorite = 1,
 	Collection = 2,
-	MultiPage = 3,
+	Recommend = 3,
 }
 
 export default function Library() {
@@ -124,10 +124,10 @@ export default function Library() {
 								/>
 							),
 						},
-						multiPage: {
+						recommend: {
 							icon: ({ focused, color, size }) => (
 								<Icon
-									name={focused ? 'folder-play' : 'folder-play-outline'}
+									name={focused ? 'compass' : 'compass-outline'}
 									size={size}
 									color={color}
 								/>

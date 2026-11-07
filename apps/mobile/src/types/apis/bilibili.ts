@@ -734,3 +734,54 @@ export interface BilibiliFollowingGroup {
 	name: string
 	count: number
 }
+
+/** 版权音乐热歌榜单条数据 */
+export interface BilibiliHotSong {
+	rank: number
+	last_rank: number
+	music_id: string
+	music_title: string
+	singer: string
+	album: string
+	mv_cover: string
+	heat: number
+	creation_aid: number
+	creation_bvid: string
+	creation_first_cid: number
+	creation_title: string
+	creation_nickname: string
+	creation_cover: string
+	creation_duration: number
+	creation_play: number
+	creation_up: number
+	achievements?: string[]
+}
+
+/** 版权音乐热歌榜完整响应 */
+export interface BilibiliHotSongsResponse {
+	list: BilibiliHotSong[]
+	list_id: number
+	period?: number
+	published_at?: number
+}
+
+/** 音乐区推荐流单条数据 */
+export interface BilibiliMusicFeedItem {
+	aid: number
+	bvid: string
+	cid: number
+	title: string
+	cover: string
+	duration: number
+	pubdate: number
+	stat: {
+		view: number
+		like: number
+		danmaku: number
+	}
+	author: {
+		mid: number
+		name: string
+	}
+}
+

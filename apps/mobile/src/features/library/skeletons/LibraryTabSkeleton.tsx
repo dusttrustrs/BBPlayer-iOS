@@ -216,7 +216,7 @@ export function CollectionListSkeleton({
 	)
 }
 
-export function MultiPageVideosListSkeleton({
+export function RecommendListSkeleton({
 	animate = true,
 }: LibrarySkeletonProps) {
 	const { colors } = useTheme()
@@ -226,27 +226,45 @@ export function MultiPageVideosListSkeleton({
 			animate={animate}
 			style={styles.listContainer}
 		>
+			{/* Top playlist cards skeleton */}
+			<View style={{ flexDirection: 'row', marginBottom: 16 }}>
+				{Array.from({ length: 3 }, (_, index) => (
+					<View
+						key={index}
+						style={{
+							width: 126,
+							height: 160,
+							borderRadius: 14,
+							backgroundColor: colors.surfaceVariant,
+							marginRight: 10,
+						}}
+					/>
+				))}
+			</View>
+
 			<View style={styles.listHeaderContainer}>
 				<View
 					style={[
 						styles.headerTitleSkeleton,
-						{ backgroundColor: colors.surfaceVariant, width: 120 },
+						{ backgroundColor: colors.surfaceVariant, width: 140 },
 					]}
 				/>
 				<View
 					style={[
 						styles.headerCountSkeleton,
-						{ backgroundColor: colors.surfaceVariant },
+						{ backgroundColor: colors.surfaceVariant, width: 80 },
 					]}
 				/>
 			</View>
 
-			{Array.from({ length: 2 }, (_, index) => (
+			{Array.from({ length: 4 }, (_, index) => (
 				<LibraryListItemSkeleton key={index} />
 			))}
 		</SkeletonPulse>
 	)
 }
+
+export const MultiPageVideosListSkeleton = RecommendListSkeleton
 
 // Default export can act as a fallback or the main entry point if needed.
 // Since existing code imports { LibraryTabSkeleton }, we keep it.
