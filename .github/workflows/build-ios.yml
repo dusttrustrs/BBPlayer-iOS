@@ -4,9 +4,9 @@ on:
   workflow_dispatch: # 支持在 GitHub Actions 页面手动一键触发构建
     inputs:
       release_version:
-        description: '应用版本号（x.y.z，例如 1.2.0）'
+        description: '应用版本号（x.y.z，例如 1.2.2）'
         required: true
-        default: '1.2.0'
+        default: '1.2.2'
         type: string
   push:
     branches:
@@ -34,7 +34,7 @@ jobs:
     env:
       APP_VARIANT: production
       EXPO_NO_TELEMETRY: '1'
-      RELEASE_VERSION: ${{ github.event.inputs.release_version || '1.2.0' }}
+      RELEASE_VERSION: ${{ github.event.inputs.release_version || '1.2.2' }}
 
     steps:
       - name: 🏗️ 检出代码
@@ -2688,7 +2688,7 @@ jobs:
           const path = require("path");
           let releaseVersion = (process.env.RELEASE_VERSION || "").trim().replace(/^v/i, "").split("-")[0];
           if (!/^\d+\.\d+\.\d+$/.test(releaseVersion)) {
-            releaseVersion = "1.2.0";
+            releaseVersion = "1.2.2";
           }
           const iosRoot = path.resolve("ios");
           const walk = (dir, result = []) => {

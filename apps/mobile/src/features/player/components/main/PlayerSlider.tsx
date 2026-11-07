@@ -1,7 +1,7 @@
 import { useIsPlaying } from '@bbplayer/orpheus'
 import Color from 'color'
-import { WavySlider } from 'expo-wavy-slider'
 import { useNavigation } from 'expo-router'
+import { WavySlider } from 'expo-wavy-slider'
 import { useCallback, useEffect, useMemo } from 'react'
 import { StyleSheet, View } from 'react-native'
 import AnimateableText from 'react-native-animateable-text'
@@ -324,22 +324,27 @@ export function PlayerSlider({
 		[duration, isScrubbing, isSeeking, onInteraction, seekPosition, handleSeek],
 	)
 
+	const syncDragStateOnJS = useCallback(
+		(dragging: boolean) => {
+			playerSliderDragging$.set(dragging)
+			if (externalDragStateChange) {
+				externalDragStateChange(dragging)
+			}
+			try {
+				navigation.setOptions({ gestureEnabled: !dragging })
+			} catch {}
+		},
+		[navigation, externalDragStateChange],
+	)
+
 	const handleDragStateChange = useCallback(
 		(dragging: boolean) => {
 			'worklet'
 			isNativeDragging.set(dragging)
 			if (!dragging) isScrubbing.set(false)
-			scheduleOnRN(() => {
-				playerSliderDragging$.set(dragging)
-				if (externalDragStateChange) {
-					externalDragStateChange(dragging)
-				}
-				try {
-					navigation.setOptions({ gestureEnabled: !dragging })
-				} catch {}
-			})
+			scheduleOnRN(syncDragStateOnJS, dragging)
 		},
-		[isNativeDragging, isScrubbing, navigation, externalDragStateChange],
+		[isNativeDragging, isScrubbing, syncDragStateOnJS],
 	)
 
 	const sliderColors = useMemo(
@@ -379,7 +384,7 @@ export function PlayerSlider({
 				/>
 			)}
 			<View
-				testID="player-slider"
+				testID='player-slider'
 				style={podcast ? styles.podcastSliderRow : undefined}
 			>
 				{podcast && (

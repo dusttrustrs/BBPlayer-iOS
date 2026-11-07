@@ -1,4 +1,5 @@
 import { RepeatMode } from '@bbplayer/orpheus'
+import { useRouter } from 'expo-router'
 import { View } from 'react-native'
 import { useTheme } from 'react-native-paper'
 
@@ -9,7 +10,6 @@ import {
 	setPlayerRepeatMode,
 	setPlayerShuffleMode,
 } from '@/hooks/player/usePlaybackOptions'
-import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { analyticsService } from '@/lib/services/analyticsService'
 import { toastAndLogError } from '@/utils/error-handling'
 import * as Haptics from '@/utils/haptics'
@@ -23,6 +23,7 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 	const { colors } = useTheme()
 	const { shuffle: shuffleMode, repeat: repeatMode } = usePlaybackOptions()
 	const currentTrack = useCurrentTrack()
+	const router = useRouter()
 
 	return (
 		<View>
@@ -85,7 +86,10 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 					disabled={currentTrack?.source !== 'bilibili'}
 					onPress={() => {
 						if (currentTrack?.source === 'bilibili') {
-							usePlayerCommentsStore.getState().open()
+							router.navigate({
+								pathname: '/comments/[bvid]',
+								params: { bvid: currentTrack.bilibiliMetadata.bvid },
+							})
 						}
 					}}
 					testID='player-open-comments'

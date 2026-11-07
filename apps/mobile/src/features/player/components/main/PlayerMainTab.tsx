@@ -1,12 +1,30 @@
-import { Orpheus, RepeatMode } from '@bbplayer/orpheus'
+import {
+	Orpheus,
+	RepeatMode,
+	type Track as OrpheusTrack,
+} from '@bbplayer/orpheus'
 import { Show } from '@legendapp/state/react'
-import type { ImageRef } from 'expo-image'
+import { Image, type ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { StyleSheet, useWindowDimensions, View } from 'react-native'
+import {
+	memo,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useState,
+} from 'react'
+import {
+	type LayoutChangeEvent,
+	StyleSheet,
+	useWindowDimensions,
+	View,
+} from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
 	Easing,
+	Extrapolation,
+	interpolate,
 	useAnimatedStyle,
 	useSharedValue,
 	withSpring,
@@ -18,7 +36,6 @@ import { scheduleOnRN } from 'react-native-worklets'
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
-import useCurrentTrackId from '@/hooks/player/useCurrentTrackId'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import useAppStore from '@/hooks/stores/useAppStore'
@@ -27,6 +44,7 @@ import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStor
 import { usePlayerQueueStore } from '@/hooks/stores/usePlayerQueueStore'
 import { analyticsService } from '@/lib/services/analyticsService'
 import * as Haptics from '@/utils/haptics'
+import { resolveBilibiliImageUrl, resolveTrackCover } from '@/utils/imageUrl'
 
 import { PlayerSlider } from './PlayerSlider'
 import { TrackInfo } from './PlayerTrackInfo'
@@ -38,7 +56,14 @@ interface PlayerMainTabProps {
 	onPresent: () => void
 }
 
-let lastPlayerSkipTime = 0
+let lastPlayerSkipTimestamp = 0
+
+function tryAcquirePlayerSkipLock(cooldownMs = 450): boolean {
+	const now = Date.now()
+	if (now - lastPlayerSkipTimestamp < cooldownMs) return false
+	lastPlayerSkipTimestamp = now
+	return true
+}
 
 const PlayerMainTab = memo(function PlayerMainTab({
 	jumpTo,
@@ -48,10 +73,27 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
 	const currentTrack = useCurrentTrack()
-	const currentTrackId = useCurrentTrackId()
+	const activeTrackKey = currentTrack?.uniqueKey
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
 	const [isDraggingSlider, setIsDraggingSlider] = useState(false)
+
+	const estimatedViewportHeight = Math.max(1, height - insets.top - 56)
+	const [viewportHeight, setViewportHeight] = useState(estimatedViewportHeight)
+	const viewportHeightSV = useSharedValue(estimatedViewportHeight)
+
+	const handleViewportLayout = useCallback(
+		(e: LayoutChangeEvent) => {
+			const measuredH = e.nativeEvent.layout.height
+			if (measuredH > 0) {
+				viewportHeightSV.set(measuredH)
+				setViewportHeight((prev) =>
+					Math.abs(prev - measuredH) > 0.5 ? measuredH : prev,
+				)
+			}
+		},
+		[viewportHeightSV],
+	)
 
 	const enableSwipeToSwitchTrack = useAppStore(
 		(state) => state.settings.enableSwipeToSwitchTrack ?? true,
@@ -70,9 +112,9 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const { repeat: repeatMode } = usePlaybackOptions()
 
 	const currentIndex = useMemo(() => {
-		if (!currentTrackId) return -1
-		return queueTracks.findIndex((t) => t.id === currentTrackId)
-	}, [currentTrackId, queueTracks])
+		if (!activeTrackKey) return -1
+		return queueTracks.findIndex((t) => t.id === activeTrackKey)
+	}, [activeTrackKey, queueTracks])
 
 	const nextTrack = useMemo(() => {
 		if (currentIndex < 0 || queueTracks.length === 0) return null
@@ -96,19 +138,42 @@ const PlayerMainTab = memo(function PlayerMainTab({
 		return null
 	}, [currentIndex, queueTracks, repeatMode])
 
+	const [frozenNextTrack, setFrozenNextTrack] = useState<OrpheusTrack | null>(
+		null,
+	)
+	const [frozenPrevTrack, setFrozenPrevTrack] = useState<OrpheusTrack | null>(
+		null,
+	)
+	const [isSwitchingTrack, setIsSwitchingTrack] = useState(false)
+	const [settledTrackKey, setSettledTrackKey] = useState(activeTrackKey)
+
+	// 预热相邻歌曲封面到内存/磁盘缓存，避免切歌瞬间解码闪烁
+	useEffect(() => {
+		const urlsToPrefetch: string[] = []
+		for (const candidate of [nextTrack, prevTrack]) {
+			if (!candidate) continue
+			const rawCover = candidate.artwork ?? ''
+			const resolved = resolveBilibiliImageUrl(
+				resolveTrackCover(candidate.id, rawCover) ?? rawCover,
+			)
+			if (resolved && /^https?:\/\//i.test(resolved)) {
+				urlsToPrefetch.push(resolved)
+			}
+		}
+		if (urlsToPrefetch.length > 0) {
+			void Image.prefetch(urlsToPrefetch, 'memory-disk').catch(() => void 0)
+		}
+	}, [nextTrack, prevTrack])
+
 	const handleSkipNext = useCallback(() => {
-		const now = Date.now()
-		if (now - lastPlayerSkipTime < 450) return
-		lastPlayerSkipTime = now
+		if (!tryAcquirePlayerSkipLock()) return
 		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
 		void Orpheus.skipToNext()
 		void analyticsService.logPlayerAction('skip_next')
 	}, [])
 
 	const handleSkipPrevious = useCallback(() => {
-		const now = Date.now()
-		if (now - lastPlayerSkipTime < 450) return
-		lastPlayerSkipTime = now
+		if (!tryAcquirePlayerSkipLock()) return
 		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
 		void Orpheus.skipToPrevious()
 		void analyticsService.logPlayerAction('skip_prev')
@@ -116,56 +181,92 @@ const PlayerMainTab = memo(function PlayerMainTab({
 
 	const swipeTranslateY = useSharedValue(0)
 	const isTransitioning = useSharedValue(false)
-	const isWaitingTrackChange = useSharedValue(false)
+	const coverSwitchFade = useSharedValue(1)
 
-	useEffect(() => {
-		if (isWaitingTrackChange.value) {
-			isWaitingTrackChange.set(false)
-			swipeTranslateY.set(0)
-			isTransitioning.set(false)
-		}
+	useLayoutEffect(() => {
+		if (settledTrackKey === activeTrackKey) return
+		setSettledTrackKey(activeTrackKey)
+		if (!isSwitchingTrack) return
+		setIsSwitchingTrack(false)
+		setFrozenNextTrack(null)
+		setFrozenPrevTrack(null)
+		swipeTranslateY.set(0)
+		isTransitioning.set(false)
+		coverSwitchFade.set(0.38)
+		coverSwitchFade.set(
+			withTiming(1, {
+				duration: 280,
+				easing: Easing.out(Easing.cubic),
+			}),
+		)
 	}, [
-		currentTrack?.uniqueKey,
+		activeTrackKey,
+		settledTrackKey,
+		isSwitchingTrack,
 		swipeTranslateY,
 		isTransitioning,
-		isWaitingTrackChange,
+		coverSwitchFade,
 	])
+
+	useEffect(() => {
+		if (!isSwitchingTrack) return
+		const timer = setTimeout(() => {
+			setIsSwitchingTrack(false)
+			setFrozenNextTrack(null)
+			setFrozenPrevTrack(null)
+			swipeTranslateY.set(0)
+			isTransitioning.set(false)
+			coverSwitchFade.set(1)
+		}, 900)
+		return () => clearTimeout(timer)
+	}, [isSwitchingTrack, swipeTranslateY, isTransitioning, coverSwitchFade])
 
 	const swipeAnimatedStyle = useAnimatedStyle(() => ({
 		transform: [{ translateY: swipeTranslateY.value }],
 	}))
 
-	const hasNext = !!nextTrack
-	const hasPrev = !!prevTrack
+	// 歌曲封面独立淡出/淡入过渡样式，平滑衔接切歌过程
+	const outgoingCoverFadeStyle = useAnimatedStyle(() => {
+		const vh = Math.max(1, viewportHeightSV.value)
+		const dragFade = interpolate(
+			Math.abs(swipeTranslateY.value),
+			[0, vh * 0.65],
+			[1, 0],
+			Extrapolation.CLAMP,
+		)
+		return {
+			opacity: coverSwitchFade.value * dragFade,
+		}
+	})
+
+	const incomingCoverFadeStyle = useAnimatedStyle(() => {
+		const vh = Math.max(1, viewportHeightSV.value)
+		return {
+			opacity: interpolate(
+				Math.abs(swipeTranslateY.value),
+				[0, vh],
+				[0, 0.38],
+				Extrapolation.CLAMP,
+			),
+		}
+	})
+
+	const displayNextTrack = frozenNextTrack ?? nextTrack
+	const displayPrevTrack = frozenPrevTrack ?? prevTrack
+	const hasNext = Boolean(displayNextTrack)
+	const hasPrev = Boolean(displayPrevTrack)
 
 	const triggerSkipNext = useCallback(() => {
-		isWaitingTrackChange.set(true)
+		setIsSwitchingTrack(true)
+		setFrozenNextTrack(nextTrack)
 		handleSkipNext()
-		setTimeout(() => {
-			if (isWaitingTrackChange.value) {
-				isWaitingTrackChange.set(false)
-				swipeTranslateY.set(0)
-				isTransitioning.set(false)
-			}
-		}, 800)
-	}, [handleSkipNext, swipeTranslateY, isTransitioning, isWaitingTrackChange])
+	}, [nextTrack, handleSkipNext])
 
 	const triggerSkipPrevious = useCallback(() => {
-		isWaitingTrackChange.set(true)
+		setIsSwitchingTrack(true)
+		setFrozenPrevTrack(prevTrack)
 		handleSkipPrevious()
-		setTimeout(() => {
-			if (isWaitingTrackChange.value) {
-				isWaitingTrackChange.set(false)
-				swipeTranslateY.set(0)
-				isTransitioning.set(false)
-			}
-		}, 800)
-	}, [
-		handleSkipPrevious,
-		swipeTranslateY,
-		isTransitioning,
-		isWaitingTrackChange,
-	])
+	}, [prevTrack, handleSkipPrevious])
 
 	// 仿抖音上下滑切歌手势：滑屏直接呈现下一首/上一首歌曲页面
 	const panGesture = useMemo(() => {
@@ -177,10 +278,8 @@ const PlayerMainTab = memo(function PlayerMainTab({
 				'worklet'
 				if (isTransitioning.value) return
 				if (e.translationY < 0) {
-					// 向上滑动
 					swipeTranslateY.set(hasNext ? e.translationY : e.translationY * 0.25)
 				} else {
-					// 向下滑动
 					swipeTranslateY.set(hasPrev ? e.translationY : e.translationY * 0.25)
 				}
 			})
@@ -189,6 +288,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 				if (isTransitioning.value) return
 				const threshold = 70
 				const velocityThreshold = 450
+				const targetDistance = Math.max(1, viewportHeightSV.value)
 
 				if (
 					(e.translationY < -threshold ||
@@ -198,7 +298,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 					isTransitioning.set(true)
 					swipeTranslateY.set(
 						withTiming(
-							-height,
+							-targetDistance,
 							{ duration: 220, easing: Easing.out(Easing.cubic) },
 							(finished) => {
 								if (finished) {
@@ -215,7 +315,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 					isTransitioning.set(true)
 					swipeTranslateY.set(
 						withTiming(
-							height,
+							targetDistance,
 							{ duration: 220, easing: Easing.out(Easing.cubic) },
 							(finished) => {
 								if (finished) {
@@ -239,12 +339,17 @@ const PlayerMainTab = memo(function PlayerMainTab({
 		isDraggingSlider,
 		hasNext,
 		hasPrev,
-		height,
+		viewportHeightSV,
 		triggerSkipNext,
 		triggerSkipPrevious,
 		swipeTranslateY,
 		isTransitioning,
 	])
+
+	const handleOpenCommentsCard = useCallback(() => {
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		usePlayerCommentsStore.getState().open()
+	}, [])
 
 	// 底部向上滑动手势：开启卡片样式评论区
 	const bottomCommentsGesture = useMemo(() => {
@@ -258,13 +363,10 @@ const PlayerMainTab = memo(function PlayerMainTab({
 					e.translationY < -30 ||
 					(e.translationY < -15 && e.velocityY < -350)
 				) {
-					scheduleOnRN(() => {
-						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-						usePlayerCommentsStore.getState().open()
-					})
+					scheduleOnRN(handleOpenCommentsCard)
 				}
 			})
-	}, [enableSwipeToOpenComments, isDraggingSlider])
+	}, [enableSwipeToOpenComments, isDraggingSlider, handleOpenCommentsCard])
 
 	// 0 = 刚旋转完（元素还在「旧位置」），1 = 各就各位；每次方向变化重播一遍编排
 	const p = useSharedValue(1)
@@ -387,7 +489,10 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	// 竖屏布局：仿抖音垂直滑屏切歌 + 底部上滑开启卡片式评论区
 	return (
 		<Show if={playbackContextStore$.ready}>
-			<View style={styles.viewportWrapper}>
+			<View
+				style={styles.viewportWrapper}
+				onLayout={handleViewportLayout}
+			>
 				<Animated.View style={[styles.container, swipeAnimatedStyle]}>
 					<GestureDetector gesture={panGesture}>
 						<View style={styles.trackInfoWrapper}>
@@ -407,6 +512,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 									jumpTo('lyrics')
 								}}
 								coverRef={imageRef}
+								coverAnimatedStyle={outgoingCoverFadeStyle}
 							/>
 						</View>
 					</GestureDetector>
@@ -434,38 +540,42 @@ const PlayerMainTab = memo(function PlayerMainTab({
 					</GestureDetector>
 				</Animated.View>
 
-				{/* 仿抖音垂直切歌预览：当向上滑动时下一首直接滑入 */}
+				{/* 仿抖音垂直切歌预览：向上滑动时下一首以相同视口高度无缝滑入 */}
 				{hasNext && (
 					<Animated.View
 						style={[
 							styles.previewContainer,
-							{ top: height },
+							{ top: viewportHeight, height: viewportHeight },
 							swipeAnimatedStyle,
 						]}
 						pointerEvents='none'
 					>
 						<PlayerTrackPreview
-							track={nextTrack}
+							track={displayNextTrack}
 							width={width}
 							insets={insets}
+							enableSwipeToOpenComments={enableSwipeToOpenComments}
+							coverAnimatedStyle={incomingCoverFadeStyle}
 						/>
 					</Animated.View>
 				)}
 
-				{/* 仿抖音垂直切歌预览：当向下滑动时上一首直接滑入 */}
+				{/* 仿抖音垂直切歌预览：向下滑动时上一首以相同视口高度无缝滑入 */}
 				{hasPrev && (
 					<Animated.View
 						style={[
 							styles.previewContainer,
-							{ top: -height },
+							{ top: -viewportHeight, height: viewportHeight },
 							swipeAnimatedStyle,
 						]}
 						pointerEvents='none'
 					>
 						<PlayerTrackPreview
-							track={prevTrack}
+							track={displayPrevTrack}
 							width={width}
 							insets={insets}
+							enableSwipeToOpenComments={enableSwipeToOpenComments}
+							coverAnimatedStyle={incomingCoverFadeStyle}
 						/>
 					</Animated.View>
 				)}
@@ -492,8 +602,6 @@ const styles = StyleSheet.create({
 		position: 'absolute',
 		left: 0,
 		right: 0,
-		bottom: 0,
-		height: '100%',
 	},
 	controlsContainer: {
 		paddingHorizontal: 24,

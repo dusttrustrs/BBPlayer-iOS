@@ -1,19 +1,23 @@
 import { LegendList } from '@legendapp/list/react-native'
 import { useRouter } from 'expo-router'
-import { memo, useCallback, useMemo } from 'react'
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
-import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { Divider, Text, useTheme } from 'react-native-paper'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+	type GestureResponderEvent,
+	Pressable,
+	StyleSheet,
+	useWindowDimensions,
+	View,
+} from 'react-native'
+import { Divider, Icon, Text, useTheme } from 'react-native-paper'
 import Animated, {
 	Easing,
 	useAnimatedStyle,
+	useSharedValue,
 	withTiming,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { scheduleOnRN } from 'react-native-worklets'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
-import IconButton from '@/components/common/IconButton'
 import { CommentItem } from '@/features/comments/components/CommentItem'
 import { useComments } from '@/hooks/queries/bilibili/comments'
 import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
@@ -25,6 +29,8 @@ interface PlayerCommentsCardProps {
 	bvid?: string
 	isLandscape?: boolean
 }
+
+const returnFalse = () => false
 
 const renderCommentItem = ({
 	item,
@@ -60,6 +66,171 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 	const toggleExpanded = usePlayerCommentsStore((state) => state.toggleExpanded)
 	const setExpanded = usePlayerCommentsStore((state) => state.setExpanded)
 
+	const [shouldRender, setShouldRender] = useState(isOpen)
+
+	const cardHeight = Math.min(height * 0.52, 440)
+	const fullHeight = Math.max(cardHeight, height - insets.top - 56)
+
+	const translateY = useSharedValue(fullHeight + 100)
+	const backdropOpacity = useSharedValue(0)
+	const wasOpenRef = useRef(false)
+	const dragStateRef = useRef({
+		pageX: 0,
+		pageY: 0,
+		startY: 0,
+		lastPageY: 0,
+		lastTime: 0,
+		vy: 0,
+	})
+
+	useEffect(() => {
+		if (isLandscape) return
+		if (isOpen) {
+			setShouldRender(true)
+			if (!wasOpenRef.current) {
+				translateY.set(fullHeight + 60)
+				backdropOpacity.set(0)
+			}
+			wasOpenRef.current = true
+			const targetY = isExpanded ? 0 : fullHeight - cardHeight
+			translateY.set(
+				withTiming(targetY, {
+					duration: 240,
+					easing: Easing.linear,
+				}),
+			)
+			backdropOpacity.set(
+				withTiming(1, {
+					duration: 220,
+					easing: Easing.linear,
+				}),
+			)
+			return
+		}
+
+		if (wasOpenRef.current) {
+			wasOpenRef.current = false
+			translateY.set(
+				withTiming(fullHeight + 100, {
+					duration: 230,
+					easing: Easing.linear,
+				}),
+			)
+			backdropOpacity.set(
+				withTiming(0, {
+					duration: 210,
+					easing: Easing.linear,
+				}),
+			)
+			const timer = setTimeout(() => {
+				setShouldRender(false)
+			}, 250)
+			return () => clearTimeout(timer)
+		}
+		setShouldRender(false)
+	}, [
+		isOpen,
+		isExpanded,
+		isLandscape,
+		fullHeight,
+		cardHeight,
+		translateY,
+		backdropOpacity,
+	])
+
+	const handleToggleExpanded = useCallback(() => {
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		toggleExpanded()
+	}, [toggleExpanded])
+
+	const handleClose = useCallback(() => {
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		close()
+	}, [close])
+
+	// 纯 JS 线程原生 Responder 事件处理：无 GestureDetector 销毁竞态、无 Worklet 闭包异常、点击子按钮零冲突
+	const handleHeaderTouchStart = useCallback(
+		(e: GestureResponderEvent) => {
+			dragStateRef.current = {
+				pageX: e.nativeEvent.pageX,
+				pageY: e.nativeEvent.pageY,
+				startY: isExpanded ? 0 : fullHeight - cardHeight,
+				lastPageY: e.nativeEvent.pageY,
+				lastTime: e.nativeEvent.timestamp,
+				vy: 0,
+			}
+		},
+		[isExpanded, fullHeight, cardHeight],
+	)
+
+	const handleMoveShouldSetResponder = useCallback(
+		(e: GestureResponderEvent) => {
+			const dy = e.nativeEvent.pageY - dragStateRef.current.pageY
+			const dx = e.nativeEvent.pageX - dragStateRef.current.pageX
+			return Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)
+		},
+		[],
+	)
+
+	const handleResponderGrant = useCallback(() => {
+		dragStateRef.current.startY = isExpanded ? 0 : fullHeight - cardHeight
+	}, [isExpanded, fullHeight, cardHeight])
+
+	const handleResponderMove = useCallback(
+		(e: GestureResponderEvent) => {
+			const state = dragStateRef.current
+			const now = e.nativeEvent.timestamp
+			const dt = now - state.lastTime
+			if (dt > 0) {
+				state.vy = (e.nativeEvent.pageY - state.lastPageY) / dt
+			}
+			state.lastPageY = e.nativeEvent.pageY
+			state.lastTime = now
+
+			const dy = e.nativeEvent.pageY - state.pageY
+			const nextY = Math.max(0, Math.min(fullHeight + 80, state.startY + dy))
+			translateY.set(nextY)
+		},
+		[fullHeight, translateY],
+	)
+
+	const handleResponderRelease = useCallback(
+		(e: GestureResponderEvent) => {
+			const state = dragStateRef.current
+			const dy = e.nativeEvent.pageY - state.pageY
+			const vy = state.vy
+
+			if (dy < -35 || vy < -0.45) {
+				void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+				if (isExpanded) {
+					translateY.set(
+						withTiming(0, { duration: 180, easing: Easing.linear }),
+					)
+				} else {
+					setExpanded(true)
+				}
+			} else if (dy > 40 || vy > 0.45) {
+				void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+				if (isExpanded) {
+					setExpanded(false)
+				} else {
+					close()
+				}
+			} else {
+				const restY = isExpanded ? 0 : fullHeight - cardHeight
+				translateY.set(
+					withTiming(restY, { duration: 180, easing: Easing.linear }),
+				)
+			}
+		},
+		[isExpanded, fullHeight, cardHeight, translateY, setExpanded, close],
+	)
+
+	const handleResponderTerminate = useCallback(() => {
+		const restY = isExpanded ? 0 : fullHeight - cardHeight
+		translateY.set(withTiming(restY, { duration: 180, easing: Easing.linear }))
+	}, [isExpanded, fullHeight, cardHeight, translateY])
+
 	const {
 		data,
 		fetchNextPage,
@@ -68,7 +239,9 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 		isLoading,
 		refetch,
 		isRefetching,
-	} = useComments(bvid ?? '', 3, { enabled: isOpen && !!bvid })
+	} = useComments(bvid ?? '', 3, {
+		enabled: Boolean(bvid && (isOpen || shouldRender)),
+	})
 
 	const comments = useMemo(
 		() => data?.pages.flatMap((page) => page.replies ?? []) ?? [],
@@ -76,86 +249,41 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 	)
 	const totalCount = data?.pages[0]?.cursor?.all_count
 
-	const onReplyPress = useCallback(
+	const handleReplyPress = useCallback(
 		(item: BilibiliCommentItem) => {
 			if (!bvid) return
-			router.navigate({
-				pathname: '/comments/reply',
-				params: { bvid, rpid: item.rpid },
+			router.push({
+				pathname: '/comments/[bvid]/reply/[rpid]',
+				params: { bvid, rpid: String(item.rpid) },
 			})
 		},
 		[bvid, router],
 	)
 
-	const extraData = useMemo(
-		() => ({ bvid: bvid ?? '', onReplyPress }),
-		[bvid, onReplyPress],
+	const keyExtractor = useCallback(
+		(item: BilibiliCommentItem) => String(item.rpid),
+		[],
 	)
 
-	const keyExtractor = useCallback(
-		(item: BilibiliCommentItem) => item.rpid.toString(),
-		[],
+	const extraData = useMemo(
+		() => ({
+			bvid: bvid ?? '',
+			onReplyPress: handleReplyPress,
+		}),
+		[bvid, handleReplyPress],
 	)
 
 	const ItemSeparatorComponent = useCallback(() => <Divider />, [])
 
-	const cardHeight = Math.min(height * 0.52, 440)
-	const fullHeight = height - insets.top - 56
+	const portraitCardStyle = useAnimatedStyle(() => ({
+		transform: [{ translateY: translateY.value }],
+	}))
 
-	const headerPanGesture = useMemo(() => {
-		return Gesture.Pan()
-			.activeOffsetY([-15, 15])
-			.failOffsetX([-25, 25])
-			.onEnd((e) => {
-				'worklet'
-				if (e.translationY < -30) {
-					scheduleOnRN(() => {
-						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-						setExpanded(true)
-					})
-				} else if (e.translationY > 30) {
-					scheduleOnRN(() => {
-						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-						if (isExpanded) {
-							setExpanded(false)
-						} else {
-							close()
-						}
-					})
-				}
-			})
-	}, [isExpanded, setExpanded, close])
+	const backdropStyle = useAnimatedStyle(() => ({
+		opacity: backdropOpacity.value,
+	}))
 
-	// 线性动画：完全避免弹性效果；固定高度 fullHeight，仅通过 translateY 控制露出范围，杜绝 UI 线程高度布局闪退
-	const portraitCardStyle = useAnimatedStyle(() => {
-		const targetY = !isOpen
-			? fullHeight + 100
-			: isExpanded
-				? 0
-				: fullHeight - cardHeight
-
-		return {
-			transform: [
-				{
-					translateY: withTiming(targetY, {
-						duration: 250,
-						easing: Easing.linear,
-					}),
-				},
-			],
-		}
-	}, [isOpen, isExpanded, fullHeight, cardHeight])
-
-	const backdropStyle = useAnimatedStyle(() => {
-		return {
-			opacity: withTiming(isOpen ? 1 : 0, {
-				duration: 220,
-				easing: Easing.linear,
-			}),
-		}
-	}, [isOpen])
-
-	// 横屏模式：卡片占据右侧控制区域
+	// 横屏模式：卡片仅占据右侧播放控制区域
 	if (isLandscape) {
 		if (!isOpen) return null
 		return (
@@ -174,11 +302,18 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 							评论区 {totalCount !== undefined ? `(${totalCount})` : ''}
 						</Text>
 					</View>
-					<IconButton
-						icon='close'
-						size={20}
-						onPress={close}
-					/>
+					<Pressable
+						style={styles.headerActionBtn}
+						hitSlop={6}
+						onPress={handleClose}
+						accessibilityLabel='关闭评论区'
+					>
+						<Icon
+							source='close'
+							size={20}
+							color={colors.onSurfaceVariant}
+						/>
+					</Pressable>
 				</View>
 				<Divider />
 				<View style={styles.content}>
@@ -225,20 +360,23 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 		)
 	}
 
-	// 竖屏模式：固定高度为 fullHeight，以线性平移方式向上展开与收缩，杜绝高度重排闪退
+	if (!isOpen && !shouldRender) {
+		return null
+	}
+
+	// 竖屏模式：无嵌套 Pressable、无 UI Worklet 手势冲突，固定高度线性平移
 	return (
-		<>
+		<View
+			pointerEvents={isOpen ? 'box-none' : 'none'}
+			style={styles.overlayRoot}
+		>
 			<Animated.View
 				pointerEvents={isOpen ? 'auto' : 'none'}
-				style={[
-					StyleSheet.absoluteFill,
-					{ backgroundColor: 'rgba(0, 0, 0, 0.4)', zIndex: 90 },
-					backdropStyle,
-				]}
+				style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}
 			>
 				<Pressable
 					style={StyleSheet.absoluteFill}
-					onPress={close}
+					onPress={handleClose}
 				/>
 			</Animated.View>
 			<Animated.View
@@ -253,10 +391,19 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 					},
 				]}
 			>
-				<GestureDetector gesture={headerPanGesture}>
+				<View
+					style={styles.dragHandleArea}
+					onTouchStart={handleHeaderTouchStart}
+					onStartShouldSetResponder={returnFalse}
+					onMoveShouldSetResponder={handleMoveShouldSetResponder}
+					onResponderGrant={handleResponderGrant}
+					onResponderMove={handleResponderMove}
+					onResponderRelease={handleResponderRelease}
+					onResponderTerminate={handleResponderTerminate}
+				>
 					<Pressable
-						style={styles.dragHandleArea}
-						onPress={toggleExpanded}
+						style={styles.pillTapArea}
+						onPress={handleToggleExpanded}
 					>
 						<View
 							style={[
@@ -264,34 +411,49 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 								{ backgroundColor: colors.outlineVariant },
 							]}
 						/>
-						<View style={styles.header}>
-							<View style={styles.titleContainer}>
-								<Text
-									variant='titleMedium'
-									style={styles.titleText}
-								>
-									评论区 {totalCount !== undefined ? `(${totalCount})` : ''}
-								</Text>
-							</View>
-							<View style={styles.headerActions}>
-								<IconButton
-									icon={isExpanded ? 'chevron-down' : 'chevron-up'}
-									size={22}
-									onPress={toggleExpanded}
-									accessibilityLabel={
-										isExpanded ? '缩小评论区' : '拉伸完整评论区'
-									}
-								/>
-								<IconButton
-									icon='close'
-									size={22}
-									onPress={close}
-									accessibilityLabel='关闭评论区'
-								/>
-							</View>
-						</View>
 					</Pressable>
-				</GestureDetector>
+					<View style={styles.header}>
+						<Pressable
+							style={styles.titleContainer}
+							onPress={handleToggleExpanded}
+						>
+							<Text
+								variant='titleMedium'
+								style={styles.titleText}
+							>
+								评论区 {totalCount !== undefined ? `(${totalCount})` : ''}
+							</Text>
+						</Pressable>
+						<View style={styles.headerActions}>
+							<Pressable
+								style={styles.headerActionBtn}
+								hitSlop={6}
+								onPress={handleToggleExpanded}
+								accessibilityLabel={
+									isExpanded ? '缩小评论区' : '拉伸完整评论区'
+								}
+							>
+								<Icon
+									source={isExpanded ? 'chevron-down' : 'chevron-up'}
+									size={22}
+									color={colors.onSurfaceVariant}
+								/>
+							</Pressable>
+							<Pressable
+								style={styles.headerActionBtn}
+								hitSlop={6}
+								onPress={handleClose}
+								accessibilityLabel='关闭评论区'
+							>
+								<Icon
+									source='close'
+									size={22}
+									color={colors.onSurfaceVariant}
+								/>
+							</Pressable>
+						</View>
+					</View>
+				</View>
 				<Divider />
 				<View style={styles.content}>
 					{!bvid ? (
@@ -303,7 +465,7 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 					) : isLoading ? (
 						<View style={styles.center}>
 							<ActivityIndicator
-								size='large'
+								size='small'
 								color={colors.primary}
 							/>
 						</View>
@@ -328,17 +490,30 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 							}
 							refreshing={isRefetching}
 							onRefresh={refetch}
-							contentContainerStyle={{ paddingBottom: 24 }}
+							contentContainerStyle={{
+								paddingBottom: Math.max(insets.bottom + 24, 32),
+							}}
 							ItemSeparatorComponent={ItemSeparatorComponent}
 						/>
 					)}
 				</View>
 			</Animated.View>
-		</>
+		</View>
 	)
 })
 
 const styles = StyleSheet.create({
+	overlayRoot: {
+		position: 'absolute',
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		zIndex: 90,
+	},
+	backdrop: {
+		backgroundColor: 'rgba(0, 0, 0, 0.4)',
+	},
 	portraitCard: {
 		position: 'absolute',
 		left: 0,
@@ -351,7 +526,6 @@ const styles = StyleSheet.create({
 		shadowOpacity: 0.18,
 		shadowRadius: 10,
 		elevation: 16,
-		zIndex: 99,
 		overflow: 'hidden',
 	},
 	landscapeCard: {
@@ -365,25 +539,30 @@ const styles = StyleSheet.create({
 		overflow: 'hidden',
 	},
 	dragHandleArea: {
-		paddingTop: 10,
+		paddingTop: 6,
+	},
+	pillTapArea: {
+		paddingVertical: 6,
+		alignItems: 'center',
 	},
 	dragHandlePill: {
 		width: 38,
 		height: 4,
 		borderRadius: 2,
-		alignSelf: 'center',
-		marginBottom: 6,
 	},
 	header: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		justifyContent: 'space-between',
-		paddingHorizontal: 16,
+		paddingLeft: 16,
+		paddingRight: 10,
 		paddingBottom: 8,
 	},
 	titleContainer: {
+		flex: 1,
 		flexDirection: 'row',
 		alignItems: 'center',
+		paddingVertical: 6,
 	},
 	titleText: {
 		fontWeight: '600',
@@ -391,6 +570,14 @@ const styles = StyleSheet.create({
 	headerActions: {
 		flexDirection: 'row',
 		alignItems: 'center',
+		gap: 4,
+	},
+	headerActionBtn: {
+		width: 38,
+		height: 38,
+		borderRadius: 19,
+		alignItems: 'center',
+		justifyContent: 'center',
 	},
 	content: {
 		flex: 1,
