@@ -317,19 +317,10 @@ function IOSSliderFallback(props: WavySliderProps) {
 			PanResponder.create({
 				onStartShouldSetPanResponder: () => enabled,
 				onStartShouldSetPanResponderCapture: () => enabled,
-				onMoveShouldSetPanResponder: (_, gestureState) => {
-					return (
-						enabled &&
-						(Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) < 15)
-					)
-				},
-				onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-					return (
-						enabled &&
-						(Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) < 15)
-					)
-				},
+				onMoveShouldSetPanResponder: () => enabled,
+				onMoveShouldSetPanResponderCapture: () => enabled,
 				onPanResponderTerminationRequest: () => false,
+				onShouldBlockNativeResponder: () => true,
 				onPanResponderGrant: (evt) => {
 					if (releaseTimerRef.current) {
 						clearTimeout(releaseTimerRef.current)
@@ -447,6 +438,27 @@ function IOSSliderFallback(props: WavySliderProps) {
 		return {
 			width: `${clamped * 100}%` as `${number}%`,
 			height: '100%',
+		}
+	}, [min, max, localProgress])
+
+	const inactiveLineAnimatedStyle = useAnimatedStyle(() => {
+		'worklet'
+		const fraction = (localProgress.value - min) / (max - min || 1)
+		const clamped = Math.max(0, Math.min(1, fraction))
+		const isAtEnd = clamped >= 0.99
+		return {
+			left: `${clamped * 100}%` as `${number}%`,
+			right: 4,
+			opacity: isAtEnd ? 0 : 1,
+		}
+	}, [min, max, localProgress])
+
+	const endDotAnimatedStyle = useAnimatedStyle(() => {
+		'worklet'
+		const fraction = (localProgress.value - min) / (max - min || 1)
+		const clamped = Math.max(0, Math.min(1, fraction))
+		return {
+			opacity: clamped >= 0.99 ? 0 : 1,
 		}
 	}, [min, max, localProgress])
 
@@ -570,16 +582,18 @@ function IOSSliderFallback(props: WavySliderProps) {
 							waveTrackVisibilityStyle,
 						],
 					},
-					createElement(View, {
+					createElement(Animated.View, {
 						style: [
 							iosSliderStyles.inactiveLine,
 							{ backgroundColor: inactiveColor },
+							inactiveLineAnimatedStyle,
 						],
 					}),
-					createElement(View, {
+					createElement(Animated.View, {
 						style: [
 							iosSliderStyles.endDot,
 							{ backgroundColor: inactiveColor },
+							endDotAnimatedStyle,
 						],
 					}),
 					createElement(
@@ -697,8 +711,6 @@ const iosSliderStyles = StyleSheet.create({
 	},
 	inactiveLine: {
 		position: 'absolute',
-		left: 0,
-		right: 4,
 		height: 3,
 		borderRadius: 1.5,
 	},

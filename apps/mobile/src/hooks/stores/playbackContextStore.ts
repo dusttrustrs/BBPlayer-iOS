@@ -20,6 +20,8 @@ export const playbackContextStore$ = observable<PlaybackContextState>({
 	ready: false,
 })
 
+export const playerSliderDragging$ = observable<boolean>(false)
+
 syncObservable(playbackContextStore$, {
 	persist: {
 		name: PLAYBACK_CONTEXT_STORAGE_KEY,

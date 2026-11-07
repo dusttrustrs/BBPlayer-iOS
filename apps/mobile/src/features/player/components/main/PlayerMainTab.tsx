@@ -1,7 +1,7 @@
 import { Show } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
-import { memo, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { ScrollView } from 'react-native-gesture-handler'
 import Animated, {
@@ -37,6 +37,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const currentTrack = useCurrentTrack()
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
+	const [isDraggingSlider, setIsDraggingSlider] = useState(false)
 
 	// 0 = 刚旋转完（元素还在「旧位置」），1 = 各就各位；每次方向变化重播一遍编排
 	const p = useSharedValue(1)
@@ -121,7 +122,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							/>
 						</Animated.View>
 						<Animated.View style={[styles.landscapeGap, sliderStyle]}>
-							<PlayerSlider />
+							<PlayerSlider onDragStateChange={setIsDraggingSlider} />
 						</Animated.View>
 						<Animated.View style={controlsStyle}>
 							<PlayerControls
@@ -139,6 +140,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	return (
 		<Show if={playbackContextStore$.ready}>
 			<ScrollView
+				scrollEnabled={!isDraggingSlider}
 				contentContainerStyle={styles.container}
 				showsVerticalScrollIndicator={false}
 			>
@@ -164,7 +166,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 						styles.controlsContainer,
 					]}
 				>
-					<PlayerSlider />
+					<PlayerSlider onDragStateChange={setIsDraggingSlider} />
 					<PlayerControls
 						onOpenQueue={() => {
 							onPresent()

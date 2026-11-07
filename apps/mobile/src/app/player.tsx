@@ -38,7 +38,7 @@ import { PlayerFunctionalMenu } from '@/features/player/components/menu/PlayerFu
 import { FluidBackground } from '@/features/player/components/visuals/FluidBackground'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import usePreventRemove from '@/hooks/router/usePreventRemove'
-import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
+import { playbackContextStore$, playerSliderDragging$ } from '@/hooks/stores/playbackContextStore'
 import useAppStore from '@/hooks/stores/useAppStore'
 import { usePlayerChaptersSheetStore } from '@/hooks/stores/usePlayerChaptersSheetStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
@@ -382,7 +382,8 @@ export default function PlayerPage() {
 										: 'music'
 								}
 								scrollEnabled={
-									playbackContextStore$.context.mode.get() !== 'podcast'
+									playbackContextStore$.context.mode.get() !== 'podcast' &&
+									!playerSliderDragging$.get()
 								}
 								ref={pagerRef}
 								style={styles.tabView}
