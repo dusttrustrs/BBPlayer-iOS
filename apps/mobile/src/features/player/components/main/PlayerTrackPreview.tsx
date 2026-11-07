@@ -6,6 +6,7 @@ import SquircleView from 'react-native-fast-squircle'
 import { Icon, Text, useTheme } from 'react-native-paper'
 import type { EdgeInsets } from 'react-native-safe-area-context'
 
+import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import {
 	SQUIRCLE_CORNER_SMOOTHING,
 	SQUIRCLE_RADIUS_RATIO,
@@ -28,8 +29,11 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 
 	if (!track) return null
 
-	const coverSize = width - 80
-	const coverRadius = coverSize * SQUIRCLE_RADIUS_RATIO
+	const podcast = playbackContextStore$.context.mode.get() === 'podcast'
+	const coverSize = podcast ? width - 80 : width - 120
+	const coverRadius = podcast
+		? (width - 80) * SQUIRCLE_RADIUS_RATIO
+		: coverSize / 2
 	const rawCover = track.artwork ?? ''
 	const coverUri = resolveBilibiliImageUrl(
 		resolveTrackCover(track.id, rawCover) ?? rawCover,
@@ -38,7 +42,7 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 	return (
 		<View style={styles.container}>
 			<View style={styles.trackInfoArea}>
-				<View style={styles.coverWrapper}>
+				<View style={[styles.coverWrapper, { height: width - 80 + 48 }]}>
 					<SquircleView
 						style={[
 							styles.coverContainer,
@@ -47,6 +51,7 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 								height: coverSize,
 								borderRadius: coverRadius,
 								backgroundColor: colors.surfaceVariant,
+								overflow: 'hidden',
 							},
 						]}
 						cornerSmoothing={SQUIRCLE_CORNER_SMOOTHING}
@@ -143,12 +148,13 @@ const styles = StyleSheet.create({
 		justifyContent: 'space-between',
 	},
 	trackInfoArea: {
-		alignItems: 'center',
-		marginTop: 8,
+		flex: 1,
+		justifyContent: 'center',
 	},
 	coverWrapper: {
 		alignItems: 'center',
 		justifyContent: 'center',
+		paddingHorizontal: 32,
 	},
 	coverContainer: {
 		overflow: 'hidden',

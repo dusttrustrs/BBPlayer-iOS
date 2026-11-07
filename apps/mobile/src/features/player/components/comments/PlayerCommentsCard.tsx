@@ -3,17 +3,17 @@ import { useRouter } from 'expo-router'
 import { memo, useCallback, useMemo } from 'react'
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { Divider, IconButton, Text, useTheme } from 'react-native-paper'
+import { Divider, Text, useTheme } from 'react-native-paper'
 import Animated, {
 	Easing,
 	useAnimatedStyle,
-	withSpring,
 	withTiming,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
+import IconButton from '@/components/common/IconButton'
 import { CommentItem } from '@/features/comments/components/CommentItem'
 import { useComments } from '@/hooks/queries/bilibili/comments'
 import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
@@ -101,7 +101,6 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 
 	const cardHeight = Math.min(height * 0.52, 440)
 	const fullHeight = height - insets.top - 56
-	const currentHeight = isExpanded ? fullHeight : cardHeight
 
 	const headerPanGesture = useMemo(() => {
 		return Gesture.Pan()
@@ -127,27 +126,32 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 			})
 	}, [isExpanded, setExpanded, close])
 
+	// 线性动画：完全避免弹性效果；固定高度 fullHeight，仅通过 translateY 控制露出范围，杜绝 UI 线程高度布局闪退
 	const portraitCardStyle = useAnimatedStyle(() => {
-		const targetY = isOpen ? 0 : height + 100
+		const targetY = !isOpen
+			? fullHeight + 100
+			: isExpanded
+				? 0
+				: fullHeight - cardHeight
+
 		return {
 			transform: [
 				{
-					translateY: withSpring(targetY, {
-						damping: 24,
-						stiffness: 180,
+					translateY: withTiming(targetY, {
+						duration: 250,
+						easing: Easing.linear,
 					}),
 				},
 			],
-			height: withTiming(currentHeight, {
-				duration: 260,
-				easing: Easing.out(Easing.cubic),
-			}),
 		}
-	}, [isOpen, height, currentHeight])
+	}, [isOpen, isExpanded, fullHeight, cardHeight])
 
 	const backdropStyle = useAnimatedStyle(() => {
 		return {
-			opacity: withTiming(isOpen ? 1 : 0, { duration: 220 }),
+			opacity: withTiming(isOpen ? 1 : 0, {
+				duration: 220,
+				easing: Easing.linear,
+			}),
 		}
 	}, [isOpen])
 
@@ -221,7 +225,7 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 		)
 	}
 
-	// 竖屏模式：底部向上弹出的卡片样式评论区，支持拉伸为完整高度
+	// 竖屏模式：固定高度为 fullHeight，以线性平移方式向上展开与收缩，杜绝高度重排闪退
 	return (
 		<>
 			<Animated.View
@@ -243,13 +247,17 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 					styles.portraitCard,
 					portraitCardStyle,
 					{
+						height: fullHeight,
 						backgroundColor: colors.elevation.level2,
 						paddingBottom: insets.bottom,
 					},
 				]}
 			>
 				<GestureDetector gesture={headerPanGesture}>
-					<View style={styles.dragHandleArea}>
+					<Pressable
+						style={styles.dragHandleArea}
+						onPress={toggleExpanded}
+					>
 						<View
 							style={[
 								styles.dragHandlePill,
@@ -282,7 +290,7 @@ export const PlayerCommentsCard = memo(function PlayerCommentsCard({
 								/>
 							</View>
 						</View>
-					</View>
+					</Pressable>
 				</GestureDetector>
 				<Divider />
 				<View style={styles.content}>

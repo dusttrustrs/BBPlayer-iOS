@@ -30,6 +30,7 @@ import {
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
 import { PlayerChaptersSheet } from '@/features/player/components/main/PlayerChaptersSheet'
 import { PlayerHeader } from '@/features/player/components/main/PlayerHeader'
@@ -111,6 +112,11 @@ export default function PlayerPage() {
 		onError: () => void 0,
 	})
 	const { width, height } = useWindowDimensions()
+	const isLandscape = width > height
+	const bvid =
+		currentTrack?.source === 'bilibili'
+			? currentTrack.bilibiliMetadata.bvid
+			: undefined
 	const colorScheme = useColorScheme()
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
@@ -434,6 +440,12 @@ export default function PlayerPage() {
 					</View>
 
 					<PlayerChaptersSheet />
+					{!isLandscape && (
+						<PlayerCommentsCard
+							bvid={bvid}
+							isLandscape={false}
+						/>
+					)}
 					<PlayerFunctionalMenu
 						menuVisible={menuVisible}
 						setMenuVisible={setMenuVisible}

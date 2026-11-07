@@ -54,7 +54,7 @@ const Lyrics = memo(function Lyrics({
 			const y = itemLayoutsRef.current[index]
 			if (y !== undefined && scrollViewRef.current) {
 				scrollViewRef.current.scrollTo({
-					y: Math.max(0, y - windowHeight * 0.15),
+					y: Math.max(0, y - windowHeight * 0.18),
 					animated,
 				})
 			}
@@ -292,7 +292,7 @@ const Lyrics = memo(function Lyrics({
 							return (
 								<Pressable
 									key='padding_item'
-									style={{ height: isLandscape ? 60 : windowHeight * 0.35 }}
+									style={{ height: isLandscape ? 80 : windowHeight * 0.44 }}
 									onPress={onPressBackground}
 								/>
 							)

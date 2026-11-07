@@ -116,6 +116,20 @@ const PlayerMainTab = memo(function PlayerMainTab({
 
 	const swipeTranslateY = useSharedValue(0)
 	const isTransitioning = useSharedValue(false)
+	const isWaitingTrackChange = useSharedValue(false)
+
+	useEffect(() => {
+		if (isWaitingTrackChange.value) {
+			isWaitingTrackChange.set(false)
+			swipeTranslateY.set(0)
+			isTransitioning.set(false)
+		}
+	}, [
+		currentTrack?.uniqueKey,
+		swipeTranslateY,
+		isTransitioning,
+		isWaitingTrackChange,
+	])
 
 	const swipeAnimatedStyle = useAnimatedStyle(() => ({
 		transform: [{ translateY: swipeTranslateY.value }],
@@ -123,6 +137,35 @@ const PlayerMainTab = memo(function PlayerMainTab({
 
 	const hasNext = !!nextTrack
 	const hasPrev = !!prevTrack
+
+	const triggerSkipNext = useCallback(() => {
+		isWaitingTrackChange.set(true)
+		handleSkipNext()
+		setTimeout(() => {
+			if (isWaitingTrackChange.value) {
+				isWaitingTrackChange.set(false)
+				swipeTranslateY.set(0)
+				isTransitioning.set(false)
+			}
+		}, 800)
+	}, [handleSkipNext, swipeTranslateY, isTransitioning, isWaitingTrackChange])
+
+	const triggerSkipPrevious = useCallback(() => {
+		isWaitingTrackChange.set(true)
+		handleSkipPrevious()
+		setTimeout(() => {
+			if (isWaitingTrackChange.value) {
+				isWaitingTrackChange.set(false)
+				swipeTranslateY.set(0)
+				isTransitioning.set(false)
+			}
+		}, 800)
+	}, [
+		handleSkipPrevious,
+		swipeTranslateY,
+		isTransitioning,
+		isWaitingTrackChange,
+	])
 
 	// 仿抖音上下滑切歌手势：滑屏直接呈现下一首/上一首歌曲页面
 	const panGesture = useMemo(() => {
@@ -159,9 +202,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							{ duration: 220, easing: Easing.out(Easing.cubic) },
 							(finished) => {
 								if (finished) {
-									scheduleOnRN(handleSkipNext)
-									swipeTranslateY.set(0)
-									isTransitioning.set(false)
+									scheduleOnRN(triggerSkipNext)
 								}
 							},
 						),
@@ -178,9 +219,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							{ duration: 220, easing: Easing.out(Easing.cubic) },
 							(finished) => {
 								if (finished) {
-									scheduleOnRN(handleSkipPrevious)
-									swipeTranslateY.set(0)
-									isTransitioning.set(false)
+									scheduleOnRN(triggerSkipPrevious)
 								}
 							},
 						),
@@ -201,8 +240,8 @@ const PlayerMainTab = memo(function PlayerMainTab({
 		hasNext,
 		hasPrev,
 		height,
-		handleSkipNext,
-		handleSkipPrevious,
+		triggerSkipNext,
+		triggerSkipPrevious,
 		swipeTranslateY,
 		isTransitioning,
 	])
@@ -430,12 +469,6 @@ const PlayerMainTab = memo(function PlayerMainTab({
 						/>
 					</Animated.View>
 				)}
-
-				{/* 竖屏卡片式评论区 */}
-				<PlayerCommentsCard
-					bvid={bvid}
-					isLandscape={false}
-				/>
 			</View>
 		</Show>
 	)
