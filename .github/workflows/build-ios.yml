@@ -3629,7 +3629,21 @@ jobs:
           grep -q 'RNFirebaseDisableSPM' Podfile || {
             printf '%s\n%s\n' '$RNFirebaseDisableSPM = true' "$(cat Podfile)" > Podfile
           }
-          pod install --repo-update 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
+          # 防御性网络重试：针对 GitHub Releases / CocoaPods 源偶发 504 Gateway Time-out 或连接中断自动重试
+          POD_INSTALLED=0
+          for attempt in 1 2 3; do
+            echo "🍎 尝试执行 pod install (第 $attempt 次)..."
+            if pod install --repo-update 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"; then
+              POD_INSTALLED=1
+              break
+            fi
+            echo "⚠️ pod install 第 $attempt 次失败，等待 5 秒后重试..."
+            sleep 5
+          done
+          if [ "$POD_INSTALLED" -ne 1 ]; then
+            echo "❌ pod install 连续 3 次失败"
+            exit 1
+          fi
           # 防御性检查：若未来 RNRepo 预编译产物的 Swift 主次版本高于当前 Runner 的 Swift 编译器，自动回退为源码编译
           if ! ruby -e '
             local = `xcrun swiftc -version`[/Apple Swift version (\d+\.\d+)/, 1]
