@@ -3629,6 +3629,23 @@ jobs:
           grep -q 'RNFirebaseDisableSPM' Podfile || {
             printf '%s\n%s\n' '$RNFirebaseDisableSPM = true' "$(cat Podfile)" > Podfile
           }
+          # 关键修复 3.1：预先拉取并缓存 Sentry.xcframework，避免 Ruby open-uri 在 GitHub Releases 偶发 504 Gateway Time-out
+          SENTRY_CACHE_DIR="$HOME/Library/Caches/sentry-react-native/xcframeworks/9.29.0"
+          if [ ! -f "$SENTRY_CACHE_DIR/Sentry.xcframework/Info.plist" ]; then
+            echo "📦 预缓存 Sentry.xcframework 9.29.0..."
+            mkdir -p "$SENTRY_CACHE_DIR"
+            curl -fL --retry 5 --retry-delay 3 -o "$SENTRY_CACHE_DIR/Sentry.xcframework.zip" \
+              "https://github.com/getsentry/sentry-cocoa/releases/download/9.29.0/Sentry.xcframework.zip" || true
+            if [ -f "$SENTRY_CACHE_DIR/Sentry.xcframework.zip" ]; then
+              unzip -q -o "$SENTRY_CACHE_DIR/Sentry.xcframework.zip" -d "$SENTRY_CACHE_DIR" || true
+              rm -f "$SENTRY_CACHE_DIR/Sentry.xcframework.zip"
+            fi
+            if [ -f "$SENTRY_CACHE_DIR/Sentry.xcframework/Info.plist" ]; then
+              echo "✅ Sentry.xcframework 预缓存就绪"
+            else
+              echo "⚠️ Sentry.xcframework 预缓存未完成，后续将由 CocoaPods 自行尝试下载"
+            fi
+          fi
           # 防御性网络重试：针对 GitHub Releases / CocoaPods 源偶发 504 Gateway Time-out 或连接中断自动重试
           POD_INSTALLED=0
           for attempt in 1 2 3; do
