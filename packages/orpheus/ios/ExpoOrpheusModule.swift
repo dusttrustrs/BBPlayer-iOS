@@ -152,20 +152,29 @@ private final class LiveActivityCoverHelper: @unchecked Sendable {
         }
 
         let attempts: [(CGFloat, CGFloat)] = [
-            (48, 0.42),
-            (44, 0.38),
-            (40, 0.34),
-            (36, 0.30)
+            (60, 0.58),
+            (54, 0.50),
+            (48, 0.44),
+            (40, 0.38),
+            (36, 0.32),
+            (32, 0.28)
         ]
+        var smallestB64: String?
         for (side, quality) in attempts {
             let thumb = Self.renderSquareImage(sourceImage, side: side)
             if let jpeg = thumb.jpegData(compressionQuality: quality) {
                 let b64 = jpeg.base64EncodedString()
-                if b64.utf8.count <= 1200 {
+                if smallestB64 == nil || b64.utf8.count < smallestB64!.utf8.count {
+                    smallestB64 = b64
+                }
+                if b64.utf8.count <= 2100 {
                     result["coverBase64"] = b64
                     break
                 }
             }
+        }
+        if result["coverBase64"] == nil, let fallback = smallestB64 {
+            result["coverBase64"] = fallback
         }
 
         return result
