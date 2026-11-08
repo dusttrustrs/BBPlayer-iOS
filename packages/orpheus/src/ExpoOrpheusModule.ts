@@ -464,10 +464,14 @@ declare class NativeOrpheusModule extends NativeModule<OrpheusEvents> {
 		playerQueue: Record<string, boolean | string | number>
 		loudness: Record<string, number>
 	}): void
-	/** 为 iOS 实时活动窗口（Live Activity）准备歌曲封面（App Group 路径 + 内联缩略图兜底）。 */
-	prepareLiveActivityCover?(
-		coverUrl: string,
-	): Promise<{ coverPath?: string; coverBase64?: string }>
+	/** 为 iOS 实时活动窗口（Live Activity）准备歌曲封面与提取的音浪渐变主题色。 */
+	prepareLiveActivityCover?(coverUrl: string): Promise<{
+		coverPath?: string
+		coverBase64?: string
+		waveTopColor?: string
+		waveMidColor?: string
+		waveBottomColor?: string
+	}>
 }
 
 const NativeModuleInstance = requireNativeModule<NativeOrpheusModule>('Orpheus')

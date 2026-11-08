@@ -36,7 +36,7 @@ private final class LiveActivityCoverHelper: @unchecked Sendable {
             } else {
                 pathOk = true
             }
-            if pathOk && !(hit["coverBase64"] ?? "").isEmpty {
+            if pathOk && !(hit["coverBase64"] ?? "").isEmpty && !(hit["waveMidColor"] ?? "").isEmpty {
                 lock.unlock()
                 completion(hit)
                 return
@@ -130,6 +130,11 @@ private final class LiveActivityCoverHelper: @unchecked Sendable {
     private func encodeCoverOutputs(sourceImage: UIImage, cacheKey: String) -> [String: String] {
         var result: [String: String] = [:]
 
+        let gradient = Self.extractWaveGradientColors(from: sourceImage)
+        result["waveTopColor"] = gradient.top
+        result["waveMidColor"] = gradient.mid
+        result["waveBottomColor"] = gradient.bottom
+
         if let groupDir = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.com.roitium.bbplayer"
         ) {
@@ -147,17 +152,16 @@ private final class LiveActivityCoverHelper: @unchecked Sendable {
         }
 
         let attempts: [(CGFloat, CGFloat)] = [
-            (60, 0.58),
-            (60, 0.46),
-            (54, 0.45),
-            (48, 0.44),
-            (42, 0.38)
+            (48, 0.42),
+            (44, 0.38),
+            (40, 0.34),
+            (36, 0.30)
         ]
         for (side, quality) in attempts {
             let thumb = Self.renderSquareImage(sourceImage, side: side)
             if let jpeg = thumb.jpegData(compressionQuality: quality) {
                 let b64 = jpeg.base64EncodedString()
-                if b64.utf8.count <= 2100 {
+                if b64.utf8.count <= 1200 {
                     result["coverBase64"] = b64
                     break
                 }
@@ -165,6 +169,142 @@ private final class LiveActivityCoverHelper: @unchecked Sendable {
         }
 
         return result
+    }
+
+    private static func extractWaveGradientColors(from image: UIImage) -> (top: String, mid: String, bottom: String) {
+        let defaultColors = ("#FF9EBB", "#FB7299", "#D9467E")
+        let sampled = renderSquareImage(image, side: 24)
+        guard let cgImage = sampled.cgImage else { return defaultColors }
+
+        let sampleSide = 24
+        let bytesPerPixel = 4
+        let bytesPerRow = sampleSide * bytesPerPixel
+        var rawBytes = [UInt8](repeating: 0, count: sampleSide * sampleSide * bytesPerPixel)
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: &rawBytes,
+            width: sampleSide,
+            height: sampleSide,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        ) else {
+            return defaultColors
+        }
+
+        context.interpolationQuality = .medium
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: sampleSide, height: sampleSide))
+
+        let bucketCount = 12
+        var bucketWeights = [CGFloat](repeating: 0, count: bucketCount)
+        var bucketR = [CGFloat](repeating: 0, count: bucketCount)
+        var bucketG = [CGFloat](repeating: 0, count: bucketCount)
+        var bucketB = [CGFloat](repeating: 0, count: bucketCount)
+
+        var fallbackWeight: CGFloat = 0
+        var fallbackR: CGFloat = 0
+        var fallbackG: CGFloat = 0
+        var fallbackB: CGFloat = 0
+
+        for y in 0..<sampleSide {
+            let cy = abs(CGFloat(y) - CGFloat(sampleSide - 1) * 0.5) / (CGFloat(sampleSide) * 0.5)
+            for x in 0..<sampleSide {
+                let cx = abs(CGFloat(x) - CGFloat(sampleSide - 1) * 0.5) / (CGFloat(sampleSide) * 0.5)
+                let offset = (y * sampleSide + x) * bytesPerPixel
+                let r = CGFloat(rawBytes[offset]) / 255.0
+                let g = CGFloat(rawBytes[offset + 1]) / 255.0
+                let b = CGFloat(rawBytes[offset + 2]) / 255.0
+
+                var h: CGFloat = 0
+                var s: CGFloat = 0
+                var v: CGFloat = 0
+                UIColor(red: r, green: g, blue: b, alpha: 1.0)
+                    .getHue(&h, saturation: &s, brightness: &v, alpha: nil)
+
+                if v < 0.15 { continue }
+                let centerBoost: CGFloat = (cx < 0.65 && cy < 0.65) ? 1.25 : 0.9
+
+                if v > 0.20 && v < 0.95 {
+                    let w = (0.2 + s) * v * centerBoost
+                    fallbackWeight += w
+                    fallbackR += r * w
+                    fallbackG += g * w
+                    fallbackB += b * w
+                }
+
+                if s < 0.14 || (v > 0.94 && s < 0.22) { continue }
+
+                let vibranceWeight = pow(s, 1.35) * sqrt(v) * centerBoost
+                let bin = min(bucketCount - 1, max(0, Int(floor(h * CGFloat(bucketCount)))))
+                bucketWeights[bin] += vibranceWeight
+                bucketR[bin] += r * vibranceWeight
+                bucketG[bin] += g * vibranceWeight
+                bucketB[bin] += b * vibranceWeight
+            }
+        }
+
+        var bestBin = -1
+        var bestWeight: CGFloat = 0
+        for i in 0..<bucketCount {
+            if bucketWeights[i] > bestWeight {
+                bestWeight = bucketWeights[i]
+                bestBin = i
+            }
+        }
+
+        var baseHue: CGFloat = 0.95
+        var baseSat: CGFloat = 0.68
+        var baseBri: CGFloat = 0.95
+
+        if bestBin >= 0 && bestWeight > 0.05 {
+            let avgR = bucketR[bestBin] / bestWeight
+            let avgG = bucketG[bestBin] / bestWeight
+            let avgB = bucketB[bestBin] / bestWeight
+            UIColor(red: avgR, green: avgG, blue: avgB, alpha: 1.0)
+                .getHue(&baseHue, saturation: &baseSat, brightness: &baseBri, alpha: nil)
+        } else if fallbackWeight > 0.05 {
+            let avgR = fallbackR / fallbackWeight
+            let avgG = fallbackG / fallbackWeight
+            let avgB = fallbackB / fallbackWeight
+            UIColor(red: avgR, green: avgG, blue: avgB, alpha: 1.0)
+                .getHue(&baseHue, saturation: &baseSat, brightness: &baseBri, alpha: nil)
+        } else {
+            return defaultColors
+        }
+
+        let midSat = min(max(baseSat * 1.18, 0.66), 0.96)
+        let midBri = min(max(baseBri * 1.12, 0.86), 0.98)
+
+        let topHue = fmod(baseHue + 1.0 - 0.045, 1.0)
+        let topSat = min(max(midSat * 0.66, 0.42), 0.82)
+        let topBri = min(max(midBri * 1.10, 0.96), 1.0)
+
+        let botHue = fmod(baseHue + 0.055, 1.0)
+        let botSat = min(max(midSat * 1.10, 0.78), 1.0)
+        let botBri = min(max(midBri * 0.74, 0.62), 0.84)
+
+        let topColor = UIColor(hue: topHue, saturation: topSat, brightness: topBri, alpha: 1.0)
+        let midColor = UIColor(hue: baseHue, saturation: midSat, brightness: midBri, alpha: 1.0)
+        let botColor = UIColor(hue: botHue, saturation: botSat, brightness: botBri, alpha: 1.0)
+
+        return (
+            top: hexString(from: topColor),
+            mid: hexString(from: midColor),
+            bottom: hexString(from: botColor)
+        )
+    }
+
+    private static func hexString(from color: UIColor) -> String {
+        var r: CGFloat = 0.98
+        var g: CGFloat = 0.45
+        var b: CGFloat = 0.60
+        color.getRed(&r, green: &g, blue: &b, alpha: nil)
+        let ri = min(255, max(0, Int(round(r * 255.0))))
+        let gi = min(255, max(0, Int(round(g * 255.0))))
+        let bi = min(255, max(0, Int(round(b * 255.0))))
+        return String(format: "#%02X%02X%02X", ri, gi, bi)
     }
 
     private static func renderSquareImage(_ source: UIImage, side: CGFloat) -> UIImage {

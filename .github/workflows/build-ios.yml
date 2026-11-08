@@ -2297,6 +2297,9 @@ jobs:
             "  phase?: number",
             "  coverPath?: string",
             "  coverBase64?: string",
+            "  waveTopColor?: string",
+            "  waveMidColor?: string",
+            "  waveBottomColor?: string",
             "}",
             "",
             "export function NowPlayingWidgetLayout(props: NowPlayingProps): LiveActivityLayout {",
@@ -2372,7 +2375,7 @@ jobs:
           ].join("\n");
           fs.writeFileSync(widgetsIndexPath, widgetsIndexSource, "utf8");
 
-          // 4. 写入 NowPlayingActivityBridge.tsx (严格单例 + 实时封面双通道同步 + 零冗余心跳)
+          // 4. 写入 NowPlayingActivityBridge.tsx (严格单例 + 实时封面与主题色渐变同步 + 原生 GCD 音浪脉冲驱动)
           const bridgeSource = [
             "import { useCallback, useEffect, useRef } from 'react'",
             "import { AppState, Platform } from 'react-native'",
@@ -2380,12 +2383,23 @@ jobs:
             "import { usePlayerStore } from '@/hooks/stores/usePlayerStore'",
             "import { NowPlayingActivity, type NowPlayingProps } from './NowPlayingActivity'",
             "",
-            "type CoverPayload = { coverPath?: string; coverBase64?: string }",
+            "type CoverPayload = {",
+            "  coverPath?: string",
+            "  coverBase64?: string",
+            "  waveTopColor?: string",
+            "  waveMidColor?: string",
+            "  waveBottomColor?: string",
+            "}",
             "",
             "let syncPromise: Promise<void> = Promise.resolve()",
             "let lastSentSignature = ''",
+            "let activeInstance: any = null",
             "const coverCache = new Map<string, CoverPayload>()",
             "const inflightCoverMap = new Map<string, Promise<CoverPayload>>()",
+            "",
+            "function enqueueSync(task: () => Promise<void>) {",
+            "  syncPromise = syncPromise.catch(() => {}).then(task)",
+            "}",
             "",
             "function truncateText(text: string, maxChars: number): string {",
             "  if (!text) return ''",
@@ -2409,6 +2423,9 @@ jobs:
             "      const payload: CoverPayload = {",
             "        coverPath: res?.coverPath || undefined,",
             "        coverBase64: res?.coverBase64 || undefined,",
+            "        waveTopColor: res?.waveTopColor || undefined,",
+            "        waveMidColor: res?.waveMidColor || undefined,",
+            "        waveBottomColor: res?.waveBottomColor || undefined,",
             "      }",
             "      if (payload.coverPath || payload.coverBase64) {",
             "        if (coverCache.size >= 24) {",
@@ -2432,8 +2449,11 @@ jobs:
             "  try {",
             "    const instances = NowPlayingActivity.getInstances()",
             "    if (instances.length > maxCount) {",
+            "      activeInstance = instances[0]",
             "      const toKill = instances.slice(maxCount)",
             "      await Promise.all(toKill.map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "    } else if (instances.length === 1) {",
+            "      activeInstance = instances[0]",
             "    }",
             "  } catch {",
             "    // 忽略异常",
@@ -2443,6 +2463,11 @@ jobs:
             "async function endAllInstances() {",
             "  try {",
             "    lastSentSignature = ''",
+            "    const target = activeInstance",
+            "    activeInstance = null",
+            "    if (target) {",
+            "      await target.end('immediate').catch(() => undefined)",
+            "    }",
             "    const instances = NowPlayingActivity.getInstances()",
             "    if (instances.length > 0) {",
             "      await Promise.all(instances.map((i: any) => i.end('immediate').catch(() => undefined)))",
@@ -2453,41 +2478,54 @@ jobs:
             "}",
             "",
             "async function pushPropsToSingleActivity(props: NowPlayingProps, force = false) {",
-            "  const sig = `${props.title}|${props.artist}|${props.isPlaying ? 1 : 0}|${props.coverPath ?? ''}|${(props.coverBase64 ?? '').slice(0, 32)}:${(props.coverBase64 ?? '').length}`",
+            "  const sig = `${props.title}|${props.artist}|${props.isPlaying ? 1 : 0}|${props.waveTopColor ?? ''}|${props.waveMidColor ?? ''}|${props.waveBottomColor ?? ''}|${props.coverPath ?? ''}|${(props.coverBase64 ?? '').slice(0, 24)}:${(props.coverBase64 ?? '').length}`",
             "  let instances = NowPlayingActivity.getInstances()",
             "",
-            "  if (!force && sig === lastSentSignature && instances.length === 1) {",
-            "    return",
-            "  }",
-            "",
             "  if (instances.length > 1) {",
-            "    await Promise.all(instances.slice(1).map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "    const extras = instances.slice(1)",
+            "    await Promise.all(extras.map((i: any) => i.end('immediate').catch(() => undefined)))",
             "    instances = [instances[0]]",
             "  }",
             "",
-            "  if (instances.length > 0) {",
+            "  const primary = instances[0] || activeInstance",
+            "  if (!force && sig === lastSentSignature && primary && instances.length === 1) {",
+            "    return",
+            "  }",
+            "",
+            "  if (primary) {",
             "    try {",
-            "      await instances[0].update(props)",
+            "      await primary.update(props)",
+            "      activeInstance = primary",
             "      lastSentSignature = sig",
             "      return",
-            "    } catch (updateErr) {",
-            "      console.warn('[LiveActivity] update failed, terminating stale card:', updateErr)",
-            "      await instances[0].end('immediate').catch(() => undefined)",
+            "    } catch {",
+            "      activeInstance = null",
             "    }",
             "  }",
             "",
-            "  const leftover = NowPlayingActivity.getInstances()",
-            "  if (leftover.length > 0) {",
-            "    await Promise.all(leftover.map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "  const retryInstances = NowPlayingActivity.getInstances()",
+            "  if (retryInstances.length > 0) {",
+            "    if (retryInstances.length > 1) {",
+            "      await Promise.all(retryInstances.slice(1).map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "    }",
+            "    try {",
+            "      await retryInstances[0].update(props)",
+            "      activeInstance = retryInstances[0]",
+            "      lastSentSignature = sig",
+            "      return",
+            "    } catch {",
+            "      await Promise.all(retryInstances.map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "    }",
             "  }",
             "",
-            "  await NowPlayingActivity.start(props, 'bbplayer://')",
+            "  const created = NowPlayingActivity.start(props, 'bbplayer://')",
+            "  activeInstance = created",
             "  lastSentSignature = sig",
             "",
-            "  const finalInstances = NowPlayingActivity.getInstances()",
-            "  if (finalInstances.length > 1) {",
-            "    const toRemove = finalInstances.slice(0, -1)",
-            "    await Promise.all(toRemove.map((i: any) => i.end('immediate').catch(() => undefined)))",
+            "  const afterInstances = NowPlayingActivity.getInstances()",
+            "  if (afterInstances.length > 1) {",
+            "    activeInstance = afterInstances[0]",
+            "    await Promise.all(afterInstances.slice(1).map((i: any) => i.end('immediate').catch(() => undefined)))",
             "  }",
             "}",
             "",
@@ -2499,7 +2537,7 @@ jobs:
             "  const syncNowPlaying = useCallback((force = false) => {",
             "    if (Platform.OS !== 'ios') return",
             "",
-            "    syncPromise = syncPromise.catch(() => {}).then(async () => {",
+            "    enqueueSync(async () => {",
             "      if (!isMountedRef.current) return",
             "",
             "      try {",
@@ -2555,6 +2593,9 @@ jobs:
             "          phase: 0,",
             "          coverPath: coverPayload.coverPath,",
             "          coverBase64: coverPayload.coverBase64,",
+            "          waveTopColor: coverPayload.waveTopColor,",
+            "          waveMidColor: coverPayload.waveMidColor,",
+            "          waveBottomColor: coverPayload.waveBottomColor,",
             "        }",
             "",
             "        await pushPropsToSingleActivity(props, force)",
@@ -2580,7 +2621,7 @@ jobs:
             "  useEffect(() => {",
             "    isMountedRef.current = true",
             "    if (Platform.OS === 'ios') {",
-            "      syncPromise = syncPromise.catch(() => {}).then(async () => {",
+            "      enqueueSync(async () => {",
             "        const state = usePlayerStore.getState()",
             "        const currentTrack = state.orpheusTrack || state.internalTrack",
             "        if (!currentTrack) {",
@@ -2613,7 +2654,7 @@ jobs:
             "    syncNowPlaying()",
             "  }, [internalTrack, orpheusTrack, syncNowPlaying])",
             "",
-            "  // 4. 事件监听防线：切歌与播放状态变化即刻同步（音浪由原生 SpringBoard Text(timerInterval:) 无限驱动，无需 JS 轮询）",
+            "  // 4. 事件监听防线：切歌与播放状态变化即刻同步",
             "  useEffect(() => {",
             "    if (Platform.OS !== 'ios') return",
             "    const subTrack = Orpheus.addListener('onTrackStarted', () => {",
@@ -2675,16 +2716,21 @@ jobs:
             console.log("✅ 已成功中和 legacy nowPlayingLiveActivity.ts，确保单例全局唯一");
           }
 
-          // 7. 定位 expo-widgets 并清空 script_phases，免除脆弱的 JS Bundle 打包脚本调用
-          function findExpoWidgetsDir() {
+          // 7. 定位所有 expo-widgets 安装目录：
+          //    a) 清空 script_phases，免除脆弱的 JS Bundle 打包脚本调用
+          //    b) 重写 LiveActivity.swift 与 LiveActivityFactory.swift，在原生 ActivityKit 层强制全局单例 (<= 1)
+          //       并内置不受通知中心下拉暂停影响的原生 GCD DispatchSourceTimer 音浪续期引擎
+          function findAllExpoWidgetsDirs() {
+            const found = new Set();
             const check = (p) => {
               try {
                 if (fs.existsSync(p)) {
                   const real = fs.realpathSync(p);
-                  if (fs.existsSync(path.join(real, "ios/ExpoWidgets.podspec"))) return real;
+                  if (fs.existsSync(path.join(real, "ios/ExpoWidgets.podspec"))) {
+                    found.add(real);
+                  }
                 }
               } catch (e) {}
-              return null;
             };
 
             for (const base of ["apps/mobile", "."]) {
@@ -2693,8 +2739,7 @@ jobs:
                 if (fs.existsSync(pkgJson)) {
                   const req = require("module").createRequire(pkgJson);
                   const resolved = path.dirname(req.resolve("expo-widgets/package.json"));
-                  const hit = check(resolved);
-                  if (hit) return hit;
+                  check(resolved);
                 }
               } catch (e) {}
             }
@@ -2704,24 +2749,327 @@ jobs:
               if (fs.existsSync(pnpmDir)) {
                 for (const ent of fs.readdirSync(pnpmDir)) {
                   if (ent.startsWith("expo-widgets@")) {
-                    const hit = check(path.join(pnpmDir, ent, "node_modules/expo-widgets"));
-                    if (hit) return hit;
+                    check(path.join(pnpmDir, ent, "node_modules/expo-widgets"));
                   }
                 }
               }
             }
-            return null;
+            return Array.from(found);
           }
 
-          const targetPkg = findExpoWidgetsDir();
-          if (targetPkg) {
-            console.log("✅ 定位到有效的 expo-widgets 目录:", targetPkg);
-            const podspec = path.join(targetPkg, "ios/ExpoWidgets.podspec");
-            if (fs.existsSync(podspec)) {
-              let p = fs.readFileSync(podspec, "utf8");
-              p = p.replace(/s\.script_phases\s*=\s*\[[\s\S]*?\]/, "s.script_phases = []");
-              fs.writeFileSync(podspec, p, "utf8");
-              console.log("✅ 已将 ExpoWidgets.podspec 的 script_phases 置空 (免除 JS Bundle 预打包)");
+          const liveActivitySwiftPatch = [
+            "import ExpoModulesCore",
+            "import ActivityKit",
+            "import UIKit",
+            "",
+            "@available(iOS 16.2, *)",
+            "final class LiveActivitySingletonManager {",
+            "  static let shared = LiveActivitySingletonManager()",
+            "  private let queue = DispatchQueue(label: \"com.roitium.bbplayer.liveactivity.singleton\")",
+            "  private var heartbeatTimer: DispatchSourceTimer?",
+            "  private var latestName: String = \"NowPlayingActivity\"",
+            "  private var latestPropsJson: String = \"{}\"",
+            "  private var isPlaying: Bool = false",
+            "  private var phase: Int = 0",
+            "  private var observersInstalled: Bool = false",
+            "",
+            "  private init() {",
+            "    installLifecycleObservers()",
+            "  }",
+            "",
+            "  private func installLifecycleObservers() {",
+            "    guard !observersInstalled else { return }",
+            "    observersInstalled = true",
+            "    let center = NotificationCenter.default",
+            "    center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in",
+            "      self?.triggerImmediatePulse()",
+            "    }",
+            "    center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in",
+            "      self?.triggerImmediatePulse()",
+            "    }",
+            "    center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in",
+            "      self?.triggerImmediatePulse()",
+            "    }",
+            "  }",
+            "",
+            "  func recordState(name: String, props: String) {",
+            "    queue.async {",
+            "      self.latestName = name",
+            "      if let data = props.data(using: .utf8),",
+            "         var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {",
+            "        let playing = (dict[\"isPlaying\"] as? Bool) ?? true",
+            "        self.isPlaying = playing",
+            "        dict[\"phase\"] = self.phase",
+            "        if let normalized = try? JSONSerialization.data(withJSONObject: dict),",
+            "           let normalizedStr = String(data: normalized, encoding: .utf8) {",
+            "          self.latestPropsJson = normalizedStr",
+            "        } else {",
+            "          self.latestPropsJson = props",
+            "        }",
+            "      } else {",
+            "        self.latestPropsJson = props",
+            "      }",
+            "      self.syncTimerLocked()",
+            "    }",
+            "  }",
+            "",
+            "  func stopHeartbeat() {",
+            "    queue.async {",
+            "      self.isPlaying = false",
+            "      self.heartbeatTimer?.cancel()",
+            "      self.heartbeatTimer = nil",
+            "    }",
+            "  }",
+            "",
+            "  private func syncTimerLocked() {",
+            "    if isPlaying {",
+            "      guard heartbeatTimer == nil else { return }",
+            "      let timer = DispatchSource.makeTimerSource(queue: queue)",
+            "      timer.schedule(deadline: .now() + 2.0, repeating: 2.0, leeway: .milliseconds(150))",
+            "      timer.setEventHandler { [weak self] in",
+            "        self?.pulseLocked()",
+            "      }",
+            "      heartbeatTimer = timer",
+            "      timer.resume()",
+            "    } else {",
+            "      heartbeatTimer?.cancel()",
+            "      heartbeatTimer = nil",
+            "    }",
+            "  }",
+            "",
+            "  private func triggerImmediatePulse() {",
+            "    queue.async {",
+            "      guard self.isPlaying else { return }",
+            "      self.pulseLocked()",
+            "    }",
+            "  }",
+            "",
+            "  private func pulseLocked() {",
+            "    guard isPlaying else { return }",
+            "    let activeList = Activity<LiveActivityAttributes>.activities.filter {",
+            "      $0.activityState == .active || $0.activityState == .stale",
+            "    }",
+            "    guard let primary = activeList.first else {",
+            "      heartbeatTimer?.cancel()",
+            "      heartbeatTimer = nil",
+            "      return",
+            "    }",
+            "    let extras = Array(activeList.dropFirst())",
+            "    phase = (phase + 1) % 12",
+            "    var updatedProps = latestPropsJson",
+            "    if let data = latestPropsJson.data(using: .utf8),",
+            "       var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {",
+            "      dict[\"phase\"] = phase",
+            "      if let newData = try? JSONSerialization.data(withJSONObject: dict),",
+            "         let newStr = String(data: newData, encoding: .utf8) {",
+            "        updatedProps = newStr",
+            "        latestPropsJson = newStr",
+            "      }",
+            "    }",
+            "    let stateName = latestName",
+            "    Task {",
+            "      for extra in extras {",
+            "        await extra.end(nil, dismissalPolicy: .immediate)",
+            "      }",
+            "      let newState = LiveActivityAttributes.ContentState(name: stateName, props: updatedProps)",
+            "      await primary.update(ActivityContent(state: newState, staleDate: nil))",
+            "    }",
+            "  }",
+            "}",
+            "",
+            "final class LiveActivity: SharedObject {",
+            "  let id: String",
+            "  let name: String",
+            "",
+            "  private var pushTokenObserverTask: Task<Void, Never>?",
+            "",
+            "  init(id: String, name: String) {",
+            "    self.id = id",
+            "    self.name = name",
+            "    super.init()",
+            "",
+            "    if #available(iOS 16.2, *) {",
+            "      observePushTokenUpdates()",
+            "    }",
+            "  }",
+            "",
+            "  deinit {",
+            "    pushTokenObserverTask?.cancel()",
+            "  }",
+            "",
+            "  @available(iOS 16.2, *)",
+            "  private func observePushTokenUpdates() {",
+            "    guard let activity = Activity<LiveActivityAttributes>.activities.first(where: { $0.id == id }) else {",
+            "      return",
+            "    }",
+            "",
+            "    pushTokenObserverTask = Task { [weak self] in",
+            "      for await data in activity.pushTokenUpdates {",
+            "        let token = data.map { String(format: \"%02x\", $0) }.joined()",
+            "        self?.emit(event: \"onLiveActivityelfordPushToken\", arguments: [",
+            "          \"activityId\": self?.id as Any,",
+            "          \"pushToken\": token",
+            "        ])",
+            "      }",
+            "    }",
+            "  }",
+            "",
+            "  func update(props: String) async throws {",
+            "    guard #available(iOS 16.2, *) else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    let activeList = Activity<LiveActivityAttributes>.activities.filter {",
+            "      $0.activityState == .active || $0.activityState == .stale",
+            "    }",
+            "    let target = activeList.first(where: { $0.id == id }) ?? activeList.first",
+            "",
+            "    guard let survivor = target else {",
+            "      throw LiveActivityNotFoundException(id)",
+            "    }",
+            "",
+            "    for extra in activeList where extra.id != survivor.id {",
+            "      await extra.end(nil, dismissalPolicy: .immediate)",
+            "    }",
+            "",
+            "    LiveActivitySingletonManager.shared.recordState(name: name, props: props)",
+            "    let newState = LiveActivityAttributes.ContentState(name: name, props: props)",
+            "    await survivor.update(ActivityContent(state: newState, staleDate: nil))",
+            "  }",
+            "",
+            "  func end(dismissalPolicy: LiveActivityDismissalPolicy?) async throws {",
+            "    guard #available(iOS 16.2, *) else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    LiveActivitySingletonManager.shared.stopHeartbeat()",
+            "    let policy = dismissalPolicy?.toDismissalPolicy ?? .immediate",
+            "    let allActivities = Activity<LiveActivityAttributes>.activities",
+            "    for item in allActivities {",
+            "      await item.end(nil, dismissalPolicy: policy)",
+            "    }",
+            "  }",
+            "",
+            "  func getPushToken() throws -> String? {",
+            "    guard #available(iOS 16.2, *) else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    let activeList = Activity<LiveActivityAttributes>.activities",
+            "    guard let activity = activeList.first(where: { $0.id == id }) ?? activeList.first else {",
+            "      throw LiveActivityNotFoundException(id)",
+            "    }",
+            "",
+            "    guard let tokenData = activity.pushToken else {",
+            "      return nil",
+            "    }",
+            "",
+            "    return tokenData.map { String(format: \"%02x\", $0) }.joined()",
+            "  }",
+            "}",
+            ""
+          ].join("\n");
+
+          const liveActivityFactorySwiftPatch = [
+            "import ExpoModulesCore",
+            "import ActivityKit",
+            "",
+            "final class LiveActivityFactory: SharedObject {",
+            "  let name: String",
+            "  let layout: String",
+            "",
+            "  init(name: String, layout: String) {",
+            "    self.name = name",
+            "    self.layout = layout",
+            "    super.init()",
+            "  }",
+            "",
+            "  func start(props: String, url: String?) throws -> LiveActivity {",
+            "    guard #available(iOS 16.2, *) else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    guard ActivityAuthorizationInfo().areActivitiesEnabled else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    LiveActivitySingletonManager.shared.recordState(name: name, props: props)",
+            "    let initialState = LiveActivityAttributes.ContentState(name: name, props: props)",
+            "",
+            "    // 原生层强制全局单例：若已存在活动卡片，直接复用并清理多余实例，绝不重复 Activity.request",
+            "    let existing = Activity<LiveActivityAttributes>.activities.filter {",
+            "      $0.activityState == .active || $0.activityState == .stale",
+            "    }",
+            "    if let survivor = existing.first {",
+            "      let extras = Array(existing.dropFirst())",
+            "      Task {",
+            "        for extra in extras {",
+            "          await extra.end(nil, dismissalPolicy: .immediate)",
+            "        }",
+            "        await survivor.update(ActivityContent(state: initialState, staleDate: nil))",
+            "      }",
+            "      return LiveActivity(id: survivor.id, name: name)",
+            "    }",
+            "",
+            "    do {",
+            "      let attributes = LiveActivityAttributes(url: url)",
+            "      let activity = try Activity.request(",
+            "        attributes: attributes,",
+            "        content: .init(state: initialState, staleDate: nil),",
+            "        pushType: .token",
+            "      )",
+            "      return LiveActivity(id: activity.id, name: name)",
+            "    } catch {",
+            "      throw StartLiveActivityException(error.localizedDescription)",
+            "    }",
+            "  }",
+            "",
+            "  func getInstances() throws -> [LiveActivity] {",
+            "    guard #available(iOS 16.2, *) else {",
+            "      throw LiveActivitiesNotSupportedException()",
+            "    }",
+            "",
+            "    let matching = Activity<LiveActivityAttributes>.activities.filter {",
+            "      ($0.activityState == .active || $0.activityState == .stale) && $0.content.state.name == name",
+            "    }",
+            "    if matching.count > 1, let survivor = matching.first {",
+            "      let extras = Array(matching.dropFirst())",
+            "      Task {",
+            "        for extra in extras {",
+            "          await extra.end(nil, dismissalPolicy: .immediate)",
+            "        }",
+            "      }",
+            "      return [LiveActivity(id: survivor.id, name: name)]",
+            "    }",
+            "    return matching.map { activity in",
+            "      LiveActivity(id: activity.id, name: name)",
+            "    }",
+            "  }",
+            "}",
+            ""
+          ].join("\n");
+
+          const targetPkgs = findAllExpoWidgetsDirs();
+          if (targetPkgs.length > 0) {
+            for (const targetPkg of targetPkgs) {
+              console.log("✅ 定位到有效的 expo-widgets 目录:", targetPkg);
+              const podspec = path.join(targetPkg, "ios/ExpoWidgets.podspec");
+              if (fs.existsSync(podspec)) {
+                let p = fs.readFileSync(podspec, "utf8");
+                p = p.replace(/s\.script_phases\s*=\s*\[[\s\S]*?\]/, "s.script_phases = []");
+                fs.writeFileSync(podspec, p, "utf8");
+                console.log("✅ 已将 ExpoWidgets.podspec 的 script_phases 置空 (免除 JS Bundle 预打包)");
+              }
+              const liveActivityFile = path.join(targetPkg, "ios/LiveActivity.swift");
+              const liveActivityFactoryFile = path.join(targetPkg, "ios/LiveActivityFactory.swift");
+              if (fs.existsSync(liveActivityFile)) {
+                fs.writeFileSync(liveActivityFile, liveActivitySwiftPatch, "utf8");
+                console.log("✅ 已注入原生单例 + GCD 音浪脉冲 LiveActivity.swift ->", liveActivityFile);
+              }
+              if (fs.existsSync(liveActivityFactoryFile)) {
+                fs.writeFileSync(liveActivityFactoryFile, liveActivityFactorySwiftPatch, "utf8");
+                console.log("✅ 已注入原生单例防重 LiveActivityFactory.swift ->", liveActivityFactoryFile);
+              }
             }
           } else {
             console.warn("⚠️ 未定位到 expo-widgets 物理安装目录，跳过 podspec 预修剪");
@@ -2905,83 +3253,6 @@ jobs:
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
-          const zlib = require("zlib");
-          const { execSync } = require("child_process");
-          const { createRequire } = require("module");
-
-          // 1. 生成专用于实时活动无限音浪的矢量胶囊字体 BBPlayerWave.ttf（'0'..'9' 映射 10 阶圆角音浪柱，':' 零宽隐藏）
-          const waveFontGzBase64 = [
-            "H4sIAAAAAAACA7WVT0gUURzHP+/NrppOKiIidJmDhJD/UdGoqC3EKEgsNAqmHW1yhV13Wf+gUOAhOkhBVkSBkFCHqLRLQXQoCEKp",
-            "DuK5Q6cQzwVC6tS8HW3XIXAOvZnhfd/v936f+b3fLr9BAIVMomGcOVvfFN1/6iXwAoj2J6yU9aFvCoQOLA/EJ66cWCq7CeIbaJ0x",
-            "27ocvXb8CISrgdZYzLZCkzyGcBSoiiVGxksK85cgfB1oiCf7LSjTIfwKaE5Y4ymKKYHwCmAMWQn7wkz+d8grABFLJYdHnEc0QX7K",
-            "9RMSprhNGOSUPA/O68wsTJpEDblDZC8ika5ejmJsOprhtIFmsLi1R9RohqK7KwloQDmaWpcT4p2aS9EIYVBPOweZNUqMeiO56TiO",
-            "iq2lQVkxqo2oZ8VZ3pFROeVAhbqaiRBV1v95ufxFFoQpptmrDuze3qRqUEELLVRkUnRWnc/OZ2cVRMeWVdm+ZKzefjeyQ5iyLCBz",
-            "IZu5+Wkn03kmTDkfjCn7s5kbd3zMqDDlWkDmXDZzfdPH3BCmvBiQWZpz9jZfPR8KU7wPWM+RnN8o5cvzozDl3YB5dubUc9HHvCpM",
-            "+TUgczqH2eo7+2Fhyn0Bz76UU883PuZzYYq5gMy+nHre28FUgF83ao5dKjn0kyJtBd9w2oSpukkB0utAwu02bs8RplqauZ0J0DMe",
-            "5VvczbMj/hzwFFj/U5UuEE9ArIE8DXIW5A+3V6u36hT/zco3dO5ve/XtPZJ8qjytUUq7p0PoDHo6TBG3PJ2HzrzbPUN7EFSie1pS",
-            "zAFPaxic9HSISkY9HaaCB57Oo5K3kUhX3Jqw073WmE2ECF3EsZjAJk0vFmPY3fbAaNxK043NAKNqQzo7sLaxruFfwdTSSB0Nu3lR",
-            "j50eHkwOGS6uRzmGGSTJEMbuIerr4v5TZtzvmn/8BnQE5PWQBwAA"
-          ].join("");
-          const waveFontBytes = zlib.gunzipSync(Buffer.from(waveFontGzBase64, "base64"));
-
-          const widgetDir = path.resolve("apps/mobile/ios/ExpoWidgetsTarget");
-          const mainAppDir = path.resolve("apps/mobile/ios/BBPlayer");
-          fs.mkdirSync(widgetDir, { recursive: true });
-          fs.writeFileSync(path.join(widgetDir, "BBPlayerWave.ttf"), waveFontBytes);
-          if (fs.existsSync(mainAppDir)) {
-            fs.writeFileSync(path.join(mainAppDir, "BBPlayerWave.ttf"), waveFontBytes);
-          }
-          console.log(`✅ 已写入实时活动音浪矢量字体 BBPlayerWave.ttf (${waveFontBytes.length} bytes)`);
-
-          function ensureWaveFontInPlist(plistFile) {
-            if (!fs.existsSync(plistFile)) return;
-            let hasFont = false;
-            try {
-              const out = execSync(`/usr/libexec/PlistBuddy -c "Print :UIAppFonts" "${plistFile}" 2>/dev/null`, { encoding: "utf8" });
-              hasFont = out.includes("BBPlayerWave.ttf");
-            } catch {
-              execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "${plistFile}" 2>/dev/null || true`);
-            }
-            if (!hasFont) {
-              execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string BBPlayerWave.ttf" "${plistFile}" 2>/dev/null || true`);
-              console.log("✅ PlistBuddy: 已向 Info.plist 注册 BBPlayerWave.ttf ->", plistFile);
-            }
-          }
-
-          ensureWaveFontInPlist(path.join(widgetDir, "Info.plist"));
-          ensureWaveFontInPlist(path.join(mainAppDir, "Info.plist"));
-
-          // 同步向 Xcode 工程的 ExpoWidgetsTarget 补充 PBXResourcesBuildPhase，确保编译期也将字体打入 .appex
-          try {
-            const appReq = createRequire(path.resolve("apps/mobile/package.json"));
-            const expoReq = createRequire(appReq.resolve("expo/package.json"));
-            const { IOSConfig } = expoReq("@expo/config-plugins");
-            const iosProjectRoot = path.resolve("apps/mobile/ios");
-            const pbxProject = IOSConfig.XcodeUtils.getPbxproj(iosProjectRoot);
-            const nativeTargets = pbxProject.pbxNativeTargetSection();
-            for (const [uuid, target] of Object.entries(nativeTargets)) {
-              if (!target || typeof target !== "object" || !target.name) continue;
-              const cleanName = String(target.name).replace(/^"|"$/g, "");
-              if (cleanName === "ExpoWidgetsTarget") {
-                const resSection = pbxProject.hash.project.objects["PBXResourcesBuildPhase"] || {};
-                const hasResPhase = (target.buildPhases || []).some((bp) => resSection[bp.value]);
-                if (!hasResPhase) {
-                  pbxProject.addBuildPhase(
-                    ["ExpoWidgetsTarget/BBPlayerWave.ttf"],
-                    "PBXResourcesBuildPhase",
-                    "Resources",
-                    uuid,
-                    "app_extension",
-                    '""'
-                  );
-                  fs.writeFileSync(pbxProject.filepath, pbxProject.writeSync(), "utf8");
-                  console.log("✅ 已为 ExpoWidgetsTarget 添加 PBXResourcesBuildPhase (BBPlayerWave.ttf)");
-                }
-              }
-            }
-          } catch (pbxErr) {
-            console.warn("⚠️ pbxproj 资源阶段注入跳过（将在 IPA 打包阶段兜底注入）:", pbxErr.message);
-          }
 
           const targetSwiftPath = path.resolve("apps/mobile/ios/ExpoWidgetsTarget/index.swift");
           const liveActivitySwift = [
@@ -2989,23 +3260,6 @@ jobs:
             "import SwiftUI",
             "import ActivityKit",
             "import UIKit",
-            "import CoreText",
-            "",
-            "private enum BBPlayerWaveFontRegistrar {",
-            "  static let fontName = \"BBPlayerWave\"",
-            "  static let isAvailable: Bool = {",
-            "    if UIFont(name: fontName, size: 16) != nil {",
-            "      return true",
-            "    }",
-            "    if let url = Bundle.main.url(forResource: fontName, withExtension: \"ttf\") {",
-            "      CTFontManagerRegisterFontURLs([url] as CFArray, .process, true, nil)",
-            "      if UIFont(name: fontName, size: 16) != nil {",
-            "        return true",
-            "      }",
-            "    }",
-            "    return false",
-            "  }()",
-            "}",
             "",
             "struct LiveActivityAttributes: ActivityAttributes {",
             "  var url: String?",
@@ -3032,6 +3286,23 @@ jobs:
             "  var phase: Int?",
             "  var coverPath: String?",
             "  var coverBase64: String?",
+            "  var waveTopColor: String?",
+            "  var waveMidColor: String?",
+            "  var waveBottomColor: String?",
+            "}",
+            "",
+            "private func parseHexColor(_ hex: String?, fallback: Color) -> Color {",
+            "  guard let raw = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {",
+            "    return fallback",
+            "  }",
+            "  let cleaned = raw.hasPrefix(\"#\") ? String(raw.dropFirst()) : raw",
+            "  guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else {",
+            "    return fallback",
+            "  }",
+            "  let r = Double((rgb >> 16) & 0xFF) / 255.0",
+            "  let g = Double((rgb >> 8) & 0xFF) / 255.0",
+            "  let b = Double(rgb & 0xFF) / 255.0",
+            "  return Color(red: r, green: g, blue: b)",
             "}",
             "",
             "@available(iOS 16.1, iOSApplicationExtension 16.1, *)",
@@ -3042,7 +3313,7 @@ jobs:
             "  var cornerRadius: CGFloat = 10",
             "  var isCircular: Bool = false",
             "  var iconSize: CGFloat = 20",
-            "  var pinkColor: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
+            "  var accentColor: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
             "",
             "  private func resolveUIImage() -> UIImage? {",
             "    if let path = coverPath, !path.isEmpty, FileManager.default.fileExists(atPath: path),",
@@ -3083,7 +3354,7 @@ jobs:
             "        }",
             "        Image(systemName: \"music.note\")",
             "          .font(.system(size: iconSize, weight: .semibold))",
-            "          .foregroundColor(pinkColor)",
+            "          .foregroundColor(accentColor)",
             "      }",
             "      .frame(width: size, height: size)",
             "    }",
@@ -3093,62 +3364,74 @@ jobs:
             "@available(iOS 16.1, iOSApplicationExtension 16.1, *)",
             "struct LiveWaveformView: View {",
             "  var isPlaying: Bool = true",
-            "  var color: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
+            "  var phase: Int = 0",
+            "  var topColor: Color = Color(red: 1.0, green: 158/255, blue: 187/255)",
+            "  var midColor: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
+            "  var bottomColor: Color = Color(red: 217/255, green: 70/255, blue: 126/255)",
             "  var barCount: Int = 5",
-            "  var barWidth: CGFloat = 3.0",
+            "  var barWidth: CGFloat = 3.2",
             "  var maxBarHeight: CGFloat = 20",
             "  var minBarHeight: CGFloat = 3.5",
             "  var spacing: CGFloat = 2.8",
             "",
-            "  // 5 根错相 0.2s 的 SpringBoard 原生计时器驱动音浪柱（合成 5Hz 永不停止的连续音浪）：",
-            "  // 在通知中心 / 锁屏界面内无限循环不停止；离开通知中心自动挂起零耗电；再次回到通知中心即刻恢复律动",
-            "  private let timerOffsets: [TimeInterval] = [-10.0, -13.2, -16.4, -19.6, -22.8]",
+            "  // 12 帧自然交错音浪矩阵，配合 TimelineView(0.28s) + 原生 GCD 2.0s 脉冲续期：",
+            "  // 100% 原生 SwiftUI Capsule + LinearGradient 矢量渲染，杜绝第三方字体在 SpringBoard 失效导致音浪消失，且在通知中心永不停止",
+            "  private let barMatrix: [[CGFloat]] = [",
+            "    [0.32, 0.85, 0.48, 0.96, 0.40],",
+            "    [0.64, 0.46, 0.94, 0.52, 0.82],",
+            "    [0.95, 0.30, 0.62, 0.88, 0.56],",
+            "    [0.54, 0.92, 0.34, 0.42, 0.95],",
+            "    [0.28, 0.68, 0.88, 0.76, 0.44],",
+            "    [0.78, 0.40, 0.98, 0.32, 0.72],",
+            "    [0.90, 0.82, 0.44, 0.92, 0.34],",
+            "    [0.42, 0.96, 0.70, 0.50, 0.88],",
+            "    [0.68, 0.36, 0.86, 0.95, 0.52],",
+            "    [0.36, 0.76, 0.52, 0.38, 0.94],",
+            "    [0.84, 0.54, 0.92, 0.68, 0.38],",
+            "    [0.48, 0.90, 0.38, 0.82, 0.74]",
+            "  ]",
+            "",
+            "  private var activeGradient: LinearGradient {",
+            "    LinearGradient(",
+            "      colors: [topColor, midColor, bottomColor],",
+            "      startPoint: .top,",
+            "      endPoint: .bottom",
+            "    )",
+            "  }",
+            "",
+            "  private var pausedGradient: LinearGradient {",
+            "    LinearGradient(",
+            "      colors: [topColor.opacity(0.65), bottomColor.opacity(0.65)],",
+            "      startPoint: .top,",
+            "      endPoint: .bottom",
+            "    )",
+            "  }",
             "",
             "  var body: some View {",
-            "    if isPlaying && BBPlayerWaveFontRegistrar.isAvailable {",
-            "      let now = Date()",
-            "      let endDate = now.addingTimeInterval(86400)",
-            "      let slotWidth = max(barWidth, maxBarHeight * 0.155)",
-            "      let count = min(max(1, barCount), timerOffsets.count)",
+            "    if isPlaying {",
+            "      TimelineView(.periodic(from: .now, by: 0.28)) { timeline in",
+            "        let tick = Int(timeline.date.timeIntervalSinceReferenceDate / 0.28)",
+            "        let matrixIndex = abs(tick + phase * 3) % barMatrix.count",
+            "        let heights = barMatrix[matrixIndex]",
             "",
-            "      HStack(alignment: .center, spacing: spacing) {",
-            "        ForEach(0..<count, id: \\.self) { idx in",
-            "          let startDate = now.addingTimeInterval(timerOffsets[idx])",
-            "          Text(timerInterval: startDate...endDate, countsDown: false, showsHours: false)",
-            "            .font(.custom(BBPlayerWaveFontRegistrar.fontName, fixedSize: maxBarHeight))",
-            "            .foregroundColor(color)",
-            "            .lineLimit(1)",
-            "            .fixedSize(horizontal: true, vertical: false)",
-            "            .frame(width: slotWidth, height: maxBarHeight, alignment: .trailing)",
-            "            .clipped()",
+            "        HStack(alignment: .center, spacing: spacing) {",
+            "          ForEach(0..<max(1, barCount), id: \\.self) { idx in",
+            "            let factor = heights[idx % heights.count]",
+            "            let h = max(minBarHeight, maxBarHeight * factor)",
+            "            Capsule(style: .continuous)",
+            "              .fill(activeGradient)",
+            "              .frame(width: barWidth, height: h)",
+            "          }",
             "        }",
+            "        .frame(height: maxBarHeight)",
+            "        .animation(.easeInOut(duration: 0.26), value: matrixIndex)",
             "      }",
-            "      .environment(\\.locale, Locale(identifier: \"en_US_POSIX\"))",
-            "      .environment(\\.layoutDirection, .leftToRight)",
-            "      .frame(height: maxBarHeight)",
-            "      .accessibilityHidden(true)",
-            "    } else if isPlaying {",
-            "      HStack(alignment: .center, spacing: spacing) {",
-            "        ForEach(0..<max(1, barCount), id: \\.self) { idx in",
-            "          let staticFactors: [CGFloat] = [0.45, 0.90, 0.60, 0.95, 0.50]",
-            "          Capsule()",
-            "            .fill(color)",
-            "            .frame(",
-            "              width: barWidth,",
-            "              height: max(minBarHeight, maxBarHeight * staticFactors[idx % staticFactors.count])",
-            "            )",
-            "        }",
-            "      }",
-            "      .frame(height: maxBarHeight)",
             "    } else {",
             "      HStack(alignment: .center, spacing: spacing) {",
             "        ForEach(0..<max(1, barCount), id: \\.self) { _ in",
-            "          Capsule()",
-            "            .fill(color.opacity(0.65))",
-            "            .frame(",
-            "              width: barWidth,",
-            "              height: minBarHeight",
-            "            )",
+            "          Capsule(style: .continuous)",
+            "            .fill(pausedGradient)",
+            "            .frame(width: barWidth, height: minBarHeight)",
             "        }",
             "      }",
             "      .frame(height: maxBarHeight)",
@@ -3157,7 +3440,9 @@ jobs:
             "}",
             "",
             "struct BBPlayerLiveActivity: Widget {",
-            "  private let pinkColor = Color(red: 251/255, green: 114/255, blue: 153/255)",
+            "  private let defaultTopColor = Color(red: 1.0, green: 158/255, blue: 187/255)",
+            "  private let defaultMidColor = Color(red: 251/255, green: 114/255, blue: 153/255)",
+            "  private let defaultBottomColor = Color(red: 217/255, green: 70/255, blue: 126/255)",
             "  private let bgDarkColor = Color(red: 28/255, green: 28/255, blue: 30/255)",
             "",
             "  var body: some WidgetConfiguration {",
@@ -3166,6 +3451,10 @@ jobs:
             "      let title = props.title ?? \"正在播放\"",
             "      let artist = props.artist ?? \"BBPlayer\"",
             "      let isPlaying = props.isPlaying ?? true",
+            "      let phase = props.phase ?? 0",
+            "      let topColor = parseHexColor(props.waveTopColor, fallback: defaultTopColor)",
+            "      let midColor = parseHexColor(props.waveMidColor, fallback: defaultMidColor)",
+            "      let bottomColor = parseHexColor(props.waveBottomColor, fallback: defaultBottomColor)",
             "",
             "      HStack(spacing: 12) {",
             "        LiveCoverArtworkView(",
@@ -3175,7 +3464,7 @@ jobs:
             "          cornerRadius: 10,",
             "          isCircular: false,",
             "          iconSize: 20,",
-            "          pinkColor: pinkColor",
+            "          accentColor: midColor",
             "        )",
             "",
             "        VStack(alignment: .leading, spacing: 3) {",
@@ -3191,7 +3480,18 @@ jobs:
             "",
             "        Spacer()",
             "",
-            "        LiveWaveformView(isPlaying: isPlaying, color: pinkColor, barCount: 5, barWidth: 3.0, maxBarHeight: 20, minBarHeight: 3.5, spacing: 2.8)",
+            "        LiveWaveformView(",
+            "          isPlaying: isPlaying,",
+            "          phase: phase,",
+            "          topColor: topColor,",
+            "          midColor: midColor,",
+            "          bottomColor: bottomColor,",
+            "          barCount: 5,",
+            "          barWidth: 3.2,",
+            "          maxBarHeight: 20,",
+            "          minBarHeight: 3.5,",
+            "          spacing: 2.8",
+            "        )",
             "      }",
             "      .padding(.horizontal, 16)",
             "      .padding(.vertical, 14)",
@@ -3202,6 +3502,10 @@ jobs:
             "      let title = props.title ?? \"正在播放\"",
             "      let artist = props.artist ?? \"BBPlayer\"",
             "      let isPlaying = props.isPlaying ?? true",
+            "      let phase = props.phase ?? 0",
+            "      let topColor = parseHexColor(props.waveTopColor, fallback: defaultTopColor)",
+            "      let midColor = parseHexColor(props.waveMidColor, fallback: defaultMidColor)",
+            "      let bottomColor = parseHexColor(props.waveBottomColor, fallback: defaultBottomColor)",
             "",
             "      return DynamicIsland {",
             "        DynamicIslandExpandedRegion(.leading) {",
@@ -3212,13 +3516,24 @@ jobs:
             "            cornerRadius: 9,",
             "            isCircular: false,",
             "            iconSize: 18,",
-            "            pinkColor: pinkColor",
+            "            accentColor: midColor",
             "          )",
             "          .padding(.leading, 4)",
             "        }",
             "        DynamicIslandExpandedRegion(.trailing) {",
-            "          LiveWaveformView(isPlaying: isPlaying, color: pinkColor, barCount: 5, barWidth: 2.7, maxBarHeight: 18, minBarHeight: 3.0, spacing: 2.5)",
-            "            .padding(.trailing, 8)",
+            "          LiveWaveformView(",
+            "            isPlaying: isPlaying,",
+            "            phase: phase,",
+            "            topColor: topColor,",
+            "            midColor: midColor,",
+            "            bottomColor: bottomColor,",
+            "            barCount: 5,",
+            "            barWidth: 2.8,",
+            "            maxBarHeight: 18,",
+            "            minBarHeight: 3.0,",
+            "            spacing: 2.5",
+            "          )",
+            "          .padding(.trailing, 8)",
             "        }",
             "        DynamicIslandExpandedRegion(.center) {",
             "          VStack(alignment: .leading, spacing: 2) {",
@@ -3251,12 +3566,23 @@ jobs:
             "          cornerRadius: 10,",
             "          isCircular: true,",
             "          iconSize: 11,",
-            "          pinkColor: pinkColor",
+            "          accentColor: midColor",
             "        )",
             "        .padding(.leading, 4)",
             "      } compactTrailing: {",
-            "        LiveWaveformView(isPlaying: isPlaying, color: pinkColor, barCount: 4, barWidth: 2.0, maxBarHeight: 12, minBarHeight: 2.2, spacing: 2.0)",
-            "          .padding(.trailing, 4)",
+            "        LiveWaveformView(",
+            "          isPlaying: isPlaying,",
+            "          phase: phase,",
+            "          topColor: topColor,",
+            "          midColor: midColor,",
+            "          bottomColor: bottomColor,",
+            "          barCount: 4,",
+            "          barWidth: 2.2,",
+            "          maxBarHeight: 12,",
+            "          minBarHeight: 2.2,",
+            "          spacing: 2.0",
+            "        )",
+            "        .padding(.trailing, 4)",
             "      } minimal: {",
             "        LiveCoverArtworkView(",
             "          coverPath: props.coverPath,",
@@ -3265,7 +3591,7 @@ jobs:
             "          cornerRadius: 10,",
             "          isCircular: true,",
             "          iconSize: 11,",
-            "          pinkColor: pinkColor",
+            "          accentColor: midColor",
             "        )",
             "      }",
             "      .widgetURL(URL(string: context.attributes.url ?? \"bbplayer://\"))",
@@ -3294,7 +3620,7 @@ jobs:
 
           fs.mkdirSync(path.dirname(targetSwiftPath), { recursive: true });
           fs.writeFileSync(targetSwiftPath, liveActivitySwift, "utf8");
-          console.log("🎉 成功向 ExpoWidgetsTarget/index.swift 写入纯原生 SwiftUI Live Activity 代码（实时封面 + 无限音浪）！");
+          console.log("🎉 成功向 ExpoWidgetsTarget/index.swift 写入纯原生 SwiftUI Live Activity 代码（实时封面 + 封面主题渐变色音浪）！");
 
           // 优化 Info.plist 的显示名称
           const plistPath = path.resolve("apps/mobile/ios/ExpoWidgetsTarget/Info.plist");
@@ -3633,50 +3959,6 @@ jobs:
           echo "✅ 已验证 IPA 应用版本: $BUILT_VERSION"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          echo "🔍 验证并确保 Payload 主应用与 ExpoWidgetsTarget.appex 均携带 BBPlayerWave.ttf 与 UIAppFonts..."
-          node << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
-          const { execSync } = require("child_process");
-
-          const srcFont = path.resolve("ExpoWidgetsTarget/BBPlayerWave.ttf");
-          const payloadApps = fs.readdirSync("Payload").filter((n) => n.endsWith(".app"));
-          if (payloadApps.length === 0) {
-            throw new Error("Payload 目录下未找到 .app 包");
-          }
-          const payloadAppDir = path.resolve("Payload", payloadApps[0]);
-          const bundleTargets = [payloadAppDir];
-          const appexDir = path.join(payloadAppDir, "PlugIns", "ExpoWidgetsTarget.appex");
-          if (fs.existsSync(appexDir)) {
-            bundleTargets.push(appexDir);
-          }
-
-          for (const bundleDir of bundleTargets) {
-            const destFont = path.join(bundleDir, "BBPlayerWave.ttf");
-            if (!fs.existsSync(destFont) && fs.existsSync(srcFont)) {
-              fs.copyFileSync(srcFont, destFont);
-              console.log("✅ 已补齐字体文件 ->", destFont);
-            }
-            const plist = path.join(bundleDir, "Info.plist");
-            if (fs.existsSync(plist)) {
-              let hasFont = false;
-              try {
-                const out = execSync(`/usr/libexec/PlistBuddy -c "Print :UIAppFonts" "${plist}" 2>/dev/null`, { encoding: "utf8" });
-                hasFont = out.includes("BBPlayerWave.ttf");
-              } catch {
-                execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "${plist}" 2>/dev/null || true`);
-              }
-              if (!hasFont) {
-                execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string BBPlayerWave.ttf" "${plist}" 2>/dev/null || true`);
-                console.log("✅ 已在 Payload Info.plist 注册 BBPlayerWave.ttf ->", plist);
-              }
-            }
-            if (!fs.existsSync(destFont) || fs.statSync(destFont).size < 1000) {
-              throw new Error(`产物缺少有效的 BBPlayerWave.ttf: ${destFont}`);
-            }
-          }
-          console.log("🎵 已确认主应用与实时活动扩展均已完整内置 BBPlayerWave.ttf 无限音浪字体！");
-          EOF
           echo "🔍 验证 Payload 产物符号表安全性（防御 safeAreaRegions 强符号篡改与非法 EmptyViewVN 跳转）..."
           node << 'EOF'
           const fs = require("fs");
