@@ -3061,6 +3061,51 @@ jobs:
               fi
             fi
 
+            echo "📋 $LABEL 检查未使用的 Swift Regex 动态库并弱化零导入依赖..."
+            node - "$BIN" "$LABEL" << 'NODE_WEAKEN_EOF'
+            const fs = require("fs");
+            const { execFileSync } = require("child_process");
+            const binPath = process.argv[2];
+            const label = process.argv[3];
+            const targets = ["libswift_StringProcessing", "libswift_RegexParser"];
+            const importsOut = execFileSync("xcrun", ["dyld_info", "-imports", binPath], { encoding: "utf8" });
+            const buf = fs.readFileSync(binPath);
+            if (buf.length < 32 || buf.readUInt32LE(0) !== 0xfeedfacf) {
+              process.exit(0);
+            }
+            const ncmds = buf.readUInt32LE(16);
+            let offset = 32;
+            let changed = false;
+            for (let i = 0; i < ncmds; i++) {
+              const cmd = buf.readUInt32LE(offset);
+              const cmdsize = buf.readUInt32LE(offset + 4);
+              if (cmd === 0x0000000c) { // LC_LOAD_DYLIB
+                const nameOff = buf.readUInt32LE(offset + 8);
+                let end = offset + nameOff;
+                while (end < offset + cmdsize && buf[end] !== 0) end++;
+                const dylibName = buf.toString("utf8", offset + nameOff, end);
+                const matched = targets.find((t) => dylibName.includes(t));
+                if (matched) {
+                  // 严格确认没有任何符号实际从该 iOS 16+ 动态库导入
+                  const importedSyms = importsOut
+                    .split("\n")
+                    .filter((line) => line.includes(matched) && !line.trim().startsWith("dyld_info"));
+                  if (importedSyms.length > 0) {
+                    console.error(`❌ ${label} 实际导入了 ${matched} 符号，无法安全弱化:`, importedSyms.slice(0, 10));
+                    process.exit(1);
+                  }
+                  buf.writeUInt32LE(0x80000018, offset); // LC_LOAD_WEAK_DYLIB
+                  console.log(`✅ ${label}: 确认 0 个符号导入，已将未使用的 ${dylibName} 弱化为 LC_LOAD_WEAK_DYLIB`);
+                  changed = true;
+                }
+              }
+              offset += cmdsize;
+            }
+            if (changed) {
+              fs.writeFileSync(binPath, buf);
+            }
+          NODE_WEAKEN_EOF
+
             echo "📋 $LABEL 强依赖动态库 (LC_LOAD_DYLIB) 校验："
             # 只检查强链接 (LC_LOAD_DYLIB)；弱链接 (LC_LOAD_WEAK_DYLIB) 在 iOS 15 上可安全缺失
             local STRONG_BAD=$(otool -l "$BIN" | awk '
