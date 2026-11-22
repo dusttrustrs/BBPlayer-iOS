@@ -28,10 +28,7 @@ import Animated, {
 
 import IconButton from '@/components/common/IconButton'
 import SkinThumbUpBurst from '@/features/player/components/visuals/SkinThumbUpBurst'
-import {
-	SPECTRUM_CANVAS_PADDING,
-	SpectrumVisualizer,
-} from '@/features/player/components/visuals/SpectrumVisualizer'
+import { SpectrumVisualizer } from '@/features/player/components/visuals/SpectrumVisualizer'
 import { useThumbUpVideo } from '@/hooks/mutations/bilibili/video'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { useGetVideoIsThumbUp } from '@/hooks/queries/bilibili/video'
@@ -51,6 +48,7 @@ export function TrackInfo({
 	coverRef,
 	part = 'all',
 	coverMaxSize,
+	spectrumVisibleHeight,
 	coverAnimatedStyle,
 }: {
 	onArtistPress: () => void
@@ -60,6 +58,8 @@ export function TrackInfo({
 	part?: 'all' | 'cover' | 'info'
 	/** 横屏时封面边长上限 */
 	coverMaxSize?: number
+	/** 横屏时左侧可见高度，用于对超出上下边界的音浪做模糊渐隐 */
+	spectrumVisibleHeight?: number
 	/** 切歌时独立的封面淡入淡出动画样式 */
 	coverAnimatedStyle?: ComponentProps<typeof Animated.View>['style']
 }) {
@@ -174,7 +174,6 @@ export function TrackInfo({
 							? coverSize * SQUIRCLE_RADIUS_RATIO
 							: coverSize / 2
 						const showSpectrum = !podcast && enableSpectrumVisualizer
-						const spectrumExtra = showSpectrum ? SPECTRUM_CANVAS_PADDING * 2 : 8
 						return (
 							<Pressable
 								style={[
@@ -182,8 +181,8 @@ export function TrackInfo({
 									{ height: coverSizeRect + 48, overflow: 'visible' },
 									coverMaxSize
 										? {
-												width: coverMaxSize + spectrumExtra,
-												height: coverMaxSize + spectrumExtra,
+												width: coverMaxSize,
+												height: coverMaxSize,
 												paddingHorizontal: 0,
 												justifyContent: 'center',
 												alignItems: 'center',
@@ -210,6 +209,7 @@ export function TrackInfo({
 											isPlaying={isPlaying}
 											size={coverSize}
 											color={colors.primary}
+											verticalVisibleSpan={spectrumVisibleHeight}
 										/>
 									</View>
 								)}

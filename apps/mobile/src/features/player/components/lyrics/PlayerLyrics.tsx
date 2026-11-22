@@ -30,10 +30,7 @@ import lyricService from '@/lib/services/lyricService'
 import { toastAndLogError } from '@/utils/error-handling'
 
 import { ModernLyricLineItem, OldSchoolLyricLineItem } from './LyricLineItem'
-import {
-	LyricsControlOverlay,
-	LYRICS_CONTROLS_OVERLAY_HEIGHT,
-} from './LyricsControlOverlay'
+import { LyricsControlOverlay } from './LyricsControlOverlay'
 import { LyricsOffsetControl } from './LyricsOffsetControl'
 
 const Lyrics = memo(function Lyrics({
@@ -47,11 +44,9 @@ const Lyrics = memo(function Lyrics({
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
-	const portraitBottomClearance = Math.max(
-		insets.bottom + 216,
-		LYRICS_CONTROLS_OVERLAY_HEIGHT,
-	)
-	const portraitBottomFadeHeight = 48
+	const portraitControlsPaddingBottom = Math.max(insets.bottom + 14, 24)
+	const portraitBottomClearance = portraitControlsPaddingBottom + 150
+	const portraitBottomFadeHeight = 28
 	const portraitBottomScrollPadding =
 		portraitBottomClearance + portraitBottomFadeHeight + 80
 	const colors = useTheme().colors

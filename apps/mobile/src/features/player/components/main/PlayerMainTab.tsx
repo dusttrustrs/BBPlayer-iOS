@@ -2,7 +2,6 @@ import {
 	Orpheus,
 	RepeatMode,
 	type Track as OrpheusTrack,
-	useSpectrumVisualizerEnabled,
 } from '@bbplayer/orpheus'
 import { Show, useValue } from '@legendapp/state/react'
 import { Image, type ImageRef } from 'expo-image'
@@ -41,7 +40,6 @@ import { scheduleOnRN } from 'react-native-worklets'
 
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
-import { SPECTRUM_CANVAS_PADDING } from '@/features/player/components/visuals/SpectrumVisualizer'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
@@ -129,7 +127,6 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	const { colors } = useTheme()
 	const currentTrack = useCurrentTrack()
 	const mode = useValue(playbackContextStore$.context.mode)
-	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 	const activeTrackKey = currentTrack?.uniqueKey
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
@@ -481,17 +478,8 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	// 横屏布局：左侧封面，右侧播放控制区域（评论区开启时卡片只占据右侧区域）
 	if (isLandscape) {
 		const padH = Math.max(insets.left, insets.right, 24)
-		const spectrumReserve =
-			enableSpectrumVisualizer && mode !== 'podcast'
-				? SPECTRUM_CANVAS_PADDING * 2
-				: 0
-		const coverSize = Math.max(
-			120,
-			Math.min(
-				width * 0.42 - spectrumReserve,
-				height - 56 - 24 - spectrumReserve,
-			),
-		)
+		const availHeight = height - 56 - 24
+		const coverSize = Math.min(width * 0.42, availHeight)
 		return (
 			<Show if={playbackContextStore$.ready}>
 				<View style={[styles.landscapeRow, { paddingHorizontal: padH }]}>
@@ -500,6 +488,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							<TrackInfo
 								part='cover'
 								coverMaxSize={coverSize}
+								spectrumVisibleHeight={availHeight}
 								onArtistPress={() => void 0}
 								onPressCover={() => {
 									void Haptics.performHaptics(

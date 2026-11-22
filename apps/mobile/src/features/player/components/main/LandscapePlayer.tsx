@@ -2,7 +2,6 @@ import {
 	Orpheus,
 	RepeatMode,
 	type Track as OrpheusTrack,
-	useSpectrumVisualizerEnabled,
 } from '@bbplayer/orpheus'
 import { Computed, Show } from '@legendapp/state/react'
 import { Image, type ImageRef } from 'expo-image'
@@ -45,7 +44,6 @@ import { PlayerCommentsCard } from '@/features/player/components/comments/Player
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
 import { PodcastSubtitles } from '@/features/player/components/lyrics/PodcastSubtitles'
-import { SPECTRUM_CANVAS_PADDING } from '@/features/player/components/visuals/SpectrumVisualizer'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import {
@@ -177,7 +175,6 @@ export function LandscapePlayer({
 		(state) => state.settings.enableSwipeToOpenComments ?? true,
 	)
 	const isCommentsOpen = usePlayerCommentsStore((state) => state.isOpen)
-	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 
 	const bvid =
 		currentTrack?.source === 'bilibili'
@@ -472,20 +469,10 @@ export function LandscapePlayer({
 	const availHeight = height - insets.top - 52 - Math.max(insets.bottom, 12)
 	const availWidth = (width - padL - padR - (isTabletScreen ? 44 : 28)) * 0.44
 	const maxCoverCap = isTabletScreen ? 430 : 340
-	const isPodcast = playbackContextStore$.context.mode.peek() === 'podcast'
-	const spectrumReserve =
-		enableSpectrumVisualizer && !isPodcast ? SPECTRUM_CANVAS_PADDING * 2 : 0
-	const coverSize = Math.max(
-		120,
-		Math.floor(
-			Math.min(
-				availWidth - spectrumReserve,
-				availHeight - spectrumReserve,
-				availHeight * 0.92,
-				maxCoverCap,
-			),
-		),
+	const coverSize = Math.floor(
+		Math.min(availWidth, availHeight * 0.92, maxCoverCap),
 	)
+	const isPodcast = playbackContextStore$.context.mode.peek() === 'podcast'
 
 	return (
 		<Show if={playbackContextStore$.ready}>
@@ -513,6 +500,7 @@ export function LandscapePlayer({
 							<TrackInfo
 								part='cover'
 								coverMaxSize={coverSize}
+								spectrumVisibleHeight={availHeight}
 								onArtistPress={() => void 0}
 								onPressCover={() => {
 									void Haptics.performHaptics(

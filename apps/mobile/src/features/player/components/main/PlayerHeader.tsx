@@ -105,6 +105,7 @@ const styles = StyleSheet.create({
 		justifyContent: 'space-between',
 		paddingVertical: 8,
 		position: 'relative',
+		zIndex: 10,
 	},
 	titleContainer: {
 		position: 'absolute',

@@ -1,5 +1,14 @@
 import { Orpheus, SPECTRUM_SIZE } from '@bbplayer/orpheus'
-import { Canvas, Path, Skia } from '@shopify/react-native-skia'
+import {
+	BlurMask,
+	Canvas,
+	LinearGradient,
+	Mask,
+	Path,
+	Rect,
+	Skia,
+	vec,
+} from '@shopify/react-native-skia'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, View } from 'react-native'
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated'
@@ -8,6 +17,7 @@ interface SpectrumVisualizerProps {
 	isPlaying: boolean
 	color?: string
 	size: number
+	verticalVisibleSpan?: number
 }
 
 const BAR_COUNT = 60
@@ -20,6 +30,7 @@ export const SpectrumVisualizer = ({
 	isPlaying,
 	color = 'white',
 	size,
+	verticalVisibleSpan,
 }: SpectrumVisualizerProps) => {
 	const frequencyData = useSharedValue<Float32Array>(
 		new Float32Array(BAR_COUNT).fill(0),
@@ -184,6 +195,24 @@ export const SpectrumVisualizer = ({
 	}, [frequencyData, isPlaying, isAppActive])
 
 	const containerSize = size + SPECTRUM_CANVAS_PADDING * 2
+	const overflowEachSide =
+		verticalVisibleSpan !== undefined
+			? Math.max(0, (containerSize - verticalVisibleSpan) / 2)
+			: 0
+	const needsVerticalEdgeBlur = overflowEachSide > 2
+
+	const topEdge = Math.max(
+		0.02,
+		Math.min(0.32, (overflowEachSide - 6) / containerSize),
+	)
+	const topSharpStart = Math.max(
+		topEdge + 0.04,
+		Math.min(0.44, (overflowEachSide + 20) / containerSize),
+	)
+	const topBlurEnd = Math.min(0.48, topSharpStart + 0.03)
+	const bottomBlurStart = 1 - topBlurEnd
+	const bottomSharpEnd = 1 - topSharpStart
+	const bottomEdge = 1 - topEdge
 
 	return (
 		<View
@@ -194,14 +223,97 @@ export const SpectrumVisualizer = ({
 			}}
 		>
 			<Canvas style={{ flex: 1 }}>
-				<Path
-					path={path}
-					color={color}
-					style='stroke'
-					strokeWidth={4}
-					strokeCap='round'
-					opacity={0.6}
-				/>
+				{needsVerticalEdgeBlur ? (
+					<>
+						<Mask
+							mode='alpha'
+							mask={
+								<Rect
+									x={0}
+									y={0}
+									width={containerSize}
+									height={containerSize}
+								>
+									<LinearGradient
+										start={vec(0, 0)}
+										end={vec(0, containerSize)}
+										colors={['transparent', 'white', 'white', 'transparent']}
+										positions={[
+											topEdge,
+											topSharpStart,
+											bottomSharpEnd,
+											bottomEdge,
+										]}
+									/>
+								</Rect>
+							}
+						>
+							<Path
+								path={path}
+								color={color}
+								style='stroke'
+								strokeWidth={4}
+								strokeCap='round'
+								opacity={0.6}
+							/>
+						</Mask>
+						<Mask
+							mode='alpha'
+							mask={
+								<Rect
+									x={0}
+									y={0}
+									width={containerSize}
+									height={containerSize}
+								>
+									<LinearGradient
+										start={vec(0, 0)}
+										end={vec(0, containerSize)}
+										colors={[
+											'rgba(255, 255, 255, 0.2)',
+											'rgba(255, 255, 255, 0.92)',
+											'transparent',
+											'transparent',
+											'rgba(255, 255, 255, 0.92)',
+											'rgba(255, 255, 255, 0.2)',
+										]}
+										positions={[
+											0,
+											topEdge,
+											topBlurEnd,
+											bottomBlurStart,
+											bottomEdge,
+											1,
+										]}
+									/>
+								</Rect>
+							}
+						>
+							<Path
+								path={path}
+								color={color}
+								style='stroke'
+								strokeWidth={4}
+								strokeCap='round'
+								opacity={0.62}
+							>
+								<BlurMask
+									blur={7}
+									style='normal'
+								/>
+							</Path>
+						</Mask>
+					</>
+				) : (
+					<Path
+						path={path}
+						color={color}
+						style='stroke'
+						strokeWidth={4}
+						strokeCap='round'
+						opacity={0.6}
+					/>
+				)}
 			</Canvas>
 		</View>
 	)
