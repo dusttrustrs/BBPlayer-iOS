@@ -2308,12 +2308,142 @@ jobs:
           }
           console.log(`✅ 已降级 ${podspecPatched} 个 .podspec 的 iOS 平台基线至 15.0`);
 
-          // 3. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块自动链接
+          // 3. 修补 ExpoAppMetrics AttributeValidation.swift 中的 iOS 16+ Swift Regex API
+          const attrFiles = walkFiles("node_modules", (name, full) =>
+            name === "AttributeValidation.swift" && full.includes("expo-app-metrics")
+          );
+          let attrPatched = 0;
+          for (const f of attrFiles) {
+            let code = fs.readFileSync(f, "utf8");
+            const next = code
+              .replace(
+                /nonisolated\(unsafe\)\s+private\s+let\s+reservedAttributePatterns:\s*\[Regex<Substring>\]\s*=\s*\[[\s\S]*?\]/,
+                [
+                  "private func isReservedAttributeKey(_ key: String) -> Bool {",
+                  '  (key.hasPrefix("expo.") && key.count > 5) || key == "session.id" || key == "event.name"',
+                  "}",
+                ].join("\n")
+              )
+              .replace(
+                /if\s+reservedAttributePatterns\.contains\(where:\s*\{\s*trimmedKey\.wholeMatch\(of:\s*\$0\)\s*!=\s*nil\s*\}\)\s*\{/,
+                "if isReservedAttributeKey(trimmedKey) {"
+              );
+            if (next !== code) {
+              fs.writeFileSync(f, next, "utf8");
+              attrPatched++;
+            }
+          }
+          console.log(`✅ 已修补 ${attrPatched} 个 AttributeValidation.swift (移除 iOS 16+ Regex 依赖)`);
+
+          // 4. 修补 ExpoModulesCore Convertibles+Color.swift 中的 iOS 16+ RegexBuilder / wholeMatch API
+          const colorFiles = walkFiles("node_modules", (name, full) =>
+            name === "Convertibles+Color.swift" && full.includes("expo-modules-core")
+          );
+          const ios15CssRegexBlock = [
+            'private let cssNumberPattern = "[+-]?\\\\d*\\\\.?\\\\d+"',
+            'private let cssNumberOrPercentPattern = "[+-]?\\\\d*\\\\.?\\\\d+%?"',
+            'private let commaSepPattern = "\\\\s*,\\\\s*"',
+            "",
+            "nonisolated(unsafe) private let rgbCommaRegex = try! NSRegularExpression(",
+            '  pattern: "^rgba?\\\\(\\\\s*(\\(cssNumberOrPercentPattern))\\(commaSepPattern)(\\(cssNumberOrPercentPattern))\\(commaSepPattern)(\\(cssNumberOrPercentPattern))(?:\\(commaSepPattern)(\\(cssNumberOrPercentPattern)))?\\\\s*\\\\)$",',
+            "  options: [.caseInsensitive]",
+            ")",
+            "",
+            "nonisolated(unsafe) private let rgbSpaceRegex = try! NSRegularExpression(",
+            '  pattern: "^rgba?\\\\(\\\\s*(\\(cssNumberOrPercentPattern))\\\\s+(\\(cssNumberOrPercentPattern))\\\\s+(\\(cssNumberOrPercentPattern))(?:\\\\s*/\\\\s*(\\(cssNumberOrPercentPattern)))?\\\\s*\\\\)$",',
+            "  options: [.caseInsensitive]",
+            ")",
+            "",
+            "nonisolated(unsafe) private let hslCommaRegex = try! NSRegularExpression(",
+            '  pattern: "^hsla?\\\\(\\\\s*(\\(cssNumberPattern))\\(commaSepPattern)(\\(cssNumberPattern))%\\(commaSepPattern)(\\(cssNumberPattern))%\\\\s*(?:,\\\\s*(\\(cssNumberOrPercentPattern)))?\\\\s*\\\\)$",',
+            "  options: [.caseInsensitive]",
+            ")",
+            "",
+            "nonisolated(unsafe) private let hslSpaceRegex = try! NSRegularExpression(",
+            '  pattern: "^hsla?\\\\(\\\\s*(\\(cssNumberPattern))\\\\s+(\\(cssNumberPattern))%\\\\s+(\\(cssNumberPattern))%\\\\s*(?:/\\\\s*(\\(cssNumberOrPercentPattern)))?\\\\s*\\\\)$",',
+            "  options: [.caseInsensitive]",
+            ")",
+            "",
+            "nonisolated(unsafe) private let hwbRegex = try! NSRegularExpression(",
+            '  pattern: "^hwb\\\\(\\\\s*(\\(cssNumberPattern))\\\\s+(\\(cssNumberPattern))%\\\\s+(\\(cssNumberPattern))%\\\\s*(?:/\\\\s*(\\(cssNumberOrPercentPattern)))?\\\\s*\\\\)$",',
+            "  options: [.caseInsensitive]",
+            ")",
+            "",
+            "private func matchCssColor(_ string: String, regex: NSRegularExpression) -> (Substring, Substring, Substring, Substring?)? {",
+            "  let nsRange = NSRange(string.startIndex..<string.endIndex, in: string)",
+            "  guard let match = regex.firstMatch(in: string, options: [], range: nsRange),",
+            "        let r1 = Range(match.range(at: 1), in: string),",
+            "        let r2 = Range(match.range(at: 2), in: string),",
+            "        let r3 = Range(match.range(at: 3), in: string) else {",
+            "    return nil",
+            "  }",
+            "  let g4: Substring? = match.numberOfRanges > 4 ? Range(match.range(at: 4), in: string).map { string[$0] } : nil",
+            "  return (string[r1], string[r2], string[r3], g4)",
+            "}",
+          ].join("\n");
+          const ios15ColorParsers = [
+            "private func colorFromRGBString(_ rgbString: String) throws -> UIColor {",
+            "  if let match = matchCssColor(rgbString, regex: rgbCommaRegex) ?? matchCssColor(rgbString, regex: rgbSpaceRegex) {",
+            "    let r = parseRgbComponent(match.0)",
+            "    let g = parseRgbComponent(match.1)",
+            "    let b = parseRgbComponent(match.2)",
+            "    let a = parseCssAlpha(match.3)",
+            "    return UIColor(red: r, green: g, blue: b, alpha: a)",
+            "  }",
+            "  throw InvalidRGBColorException(rgbString)",
+            "}",
+            "",
+            "private func colorFromHSLString(_ hslString: String) throws -> UIColor {",
+            "  if let match = matchCssColor(hslString, regex: hslCommaRegex) ?? matchCssColor(hslString, regex: hslSpaceRegex) {",
+            "    let h = CGFloat(Double(match.0) ?? 0)",
+            "    let s = CGFloat(min(max((Double(match.1) ?? 0) / 100.0, 0), 1))",
+            "    let l = CGFloat(min(max((Double(match.2) ?? 0) / 100.0, 0), 1))",
+            "    let a = parseCssAlpha(match.3)",
+            "    return hslToUIColor(h: h, s: s, l: l, a: a)",
+            "  }",
+            "  throw InvalidHSLColorException(hslString)",
+            "}",
+            "",
+            "private func colorFromHWBString(_ hwbString: String) throws -> UIColor {",
+            "  if let match = matchCssColor(hwbString, regex: hwbRegex) {",
+            "    let h = CGFloat(Double(match.0) ?? 0)",
+            "    let w = CGFloat((Double(match.1) ?? 0) / 100.0)",
+            "    let b = CGFloat((Double(match.2) ?? 0) / 100.0)",
+            "    let a = parseCssAlpha(match.3)",
+            "    return hwbToUIColor(h: h, w: w, b: b, a: a)",
+            "  }",
+            "  throw InvalidHWBColorException(hwbString)",
+            "}",
+          ].join("\n");
+          let colorPatched = 0;
+          for (const f of colorFiles) {
+            let code = fs.readFileSync(f, "utf8");
+            if (!code.includes("import RegexBuilder")) continue;
+            let next = code
+              .replace("import RegexBuilder", "import Foundation")
+              .replace(
+                /nonisolated\(unsafe\)\s+private\s+let\s+cssNumber\s*=\s*Regex\s*\{[\s\S]*?\}\.ignoresCase\(\)\s*(?=\n\/\/ MARK: - CSS Color Function Parsers)/,
+                ios15CssRegexBlock + "\n"
+              )
+              .replace(
+                /private\s+func\s+colorFromRGBString\(_ rgbString: String\)[\s\S]*?throw InvalidHWBColorException\(hwbString\)\n\}/,
+                ios15ColorParsers
+              );
+            if (next.includes("import RegexBuilder") || next.includes("wholeMatch(of:")) {
+              throw new Error(`Convertibles+Color.swift 修补不完整: ${f}`);
+            }
+            fs.writeFileSync(f, next, "utf8");
+            colorPatched++;
+          }
+          console.log(`✅ 已修补 ${colorPatched} 个 Convertibles+Color.swift (移除 iOS 16+ RegexBuilder 依赖)`);
+
+          // 5. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
           const pkgPath = "apps/mobile/package.json";
           const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
           pkg.expo = pkg.expo || {};
           pkg.expo.autolinking = pkg.expo.autolinking || {};
           pkg.expo.autolinking.ios = pkg.expo.autolinking.ios || {};
+          pkg.expo.autolinking.ios.buildFromSource = [".*"];
           const excludes = new Set(Array.isArray(pkg.expo.autolinking.ios.exclude) ? pkg.expo.autolinking.ios.exclude : []);
           for (const mod of [
             "@expo/ui",
@@ -2329,7 +2459,7 @@ jobs:
           }
           pkg.expo.autolinking.ios.exclude = Array.from(excludes);
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, "\t") + "\n", "utf8");
-          console.log("✅ 已确认 iOS autolinking 排除列表:", pkg.expo.autolinking.ios.exclude.join(", "));
+          console.log("✅ 已确认 iOS autolinking buildFromSource=['.*'] 与排除列表:", pkg.expo.autolinking.ios.exclude.join(", "));
           EOF
 
       - name: 📱 生成 iOS 原生工程 (Expo Prebuild - iOS 15.0)
@@ -2382,10 +2512,14 @@ jobs:
           fs.writeFileSync(podPropsPath, JSON.stringify(podProps, null, 2) + "\n", "utf8");
           console.log("✅ 已设置 Podfile.properties.json ios.deploymentTarget = 15.0");
 
-          // 更新 Podfile：平台固定为 15.0，注入 $RNFirebaseDisableSPM，并在 post_install 中强制所有 Pods Target 为 15.0
+          // 更新 Podfile：平台固定为 15.0，禁用预编译模块与 Firebase SPM，并在 post_install 中强制所有 Pods Target 为 15.0
           const podfilePath = path.join(iosRoot, "Podfile");
           if (fs.existsSync(podfilePath)) {
             let podfile = fs.readFileSync(podfilePath, "utf8");
+            podfile = podfile.replace(/ENV\[['"]EXPO_USE_PRECOMPILED_MODULES['"]\]\s*=\s*['"]1['"]/g, "ENV['EXPO_USE_PRECOMPILED_MODULES'] = '0'");
+            if (!podfile.includes("EXPO_USE_PRECOMPILED_MODULES")) {
+              podfile = "ENV['EXPO_USE_PRECOMPILED_MODULES'] = '0'\n" + podfile;
+            }
             if (!podfile.includes("RNFirebaseDisableSPM")) {
               podfile = "$RNFirebaseDisableSPM = true\n" + podfile;
             }
@@ -2527,6 +2661,7 @@ jobs:
       - name: 🍎 安装 CocoaPods 依赖 (iOS 15.0 源码编译)
         env:
           EXPO_USE_SOURCE: '1'
+          EXPO_USE_PRECOMPILED_MODULES: '0'
           DISABLE_RNREPO: '1'
         run: |
           set -o pipefail
@@ -2886,7 +3021,7 @@ jobs:
               /cmd LC_LOAD_DYLIB/ { strong=1; next }
               /cmd LC_/ { strong=0; next }
               strong && /name / { print $2 }
-            ' | grep -E "(ActivityKit|AppIntents|TipKit|Charts|WidgetKit|WorkoutKit|SensitiveContentAnalysis|Translation|LiveCommunicationKit)\.framework" || true)
+            ' | grep -E "((ActivityKit|AppIntents|TipKit|Charts|WidgetKit|WorkoutKit|SensitiveContentAnalysis|Translation|LiveCommunicationKit)\.framework|libswift_StringProcessing|libswift_RegexParser)" || true)
             if [ -n "$STRONG_BAD" ]; then
               echo "❌ 致命错误：$LABEL 存在对 iOS 16+ 系统框架的强链接，iOS 15.0 启动必闪退！"
               echo "$STRONG_BAD"
