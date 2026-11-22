@@ -154,6 +154,20 @@
 		"typescript": "~6.0.3"
 	},
 	"expo": {
+		"autolinking": {
+			"ios": {
+				"exclude": [
+					"@expo/ui",
+					"expo-widgets",
+					"expo-glass-effect",
+					"expo-symbols",
+					"expo-dev-client",
+					"expo-dev-launcher",
+					"expo-dev-menu",
+					"expo-dev-menu-interface"
+				]
+			}
+		},
 		"install": {
 			"exclude": [
 				"@sentry/react-native",

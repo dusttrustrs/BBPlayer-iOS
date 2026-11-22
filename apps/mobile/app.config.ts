@@ -4,7 +4,6 @@ import path from 'path'
 
 import expoAsset from 'expo-asset/plugin'
 import expoBuildProperties from 'expo-build-properties/plugin'
-import expoDevClient from 'expo-dev-client/plugin'
 import expoFont from 'expo-font/plugin'
 import expoImage from 'expo-image/plugin'
 import expoMediaLibrary from 'expo-media-library/plugin'
@@ -148,13 +147,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 			],
 		},
 		plugins: [
-			[
-				'expo-widgets',
-				{
-					frequentUpdates: true,
-					groupIdentifier: 'group.com.roitium.bbplayer',
-				},
-			],
 			'expo-screen-orientation',
 			'./expo-plugins/withProductionDebugSigning',
 			'./expo-plugins/withKotlinSerialization',
@@ -169,9 +161,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 							: ['arm64-v8a'],
 				},
 			],
-			expoDevClient({
-				launchMode: 'most-recent',
-			}),
 			bootsplash({
 				logo: './assets/images/splash-icon.png',
 				logoWidth: 120,
@@ -274,7 +263,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 			expoWebBrowser(),
 			expoSqlite(),
 			expoRouter(),
-			'@rnrepo/expo-config-plugin',
 			expoMediaLibrary({
 				photosPermission: '允许 $(PRODUCT_NAME) 访问您的相册',
 				savePhotosPermission: '允许 $(PRODUCT_NAME) 保存图片到您的相册',

@@ -45,4 +45,53 @@ const config = withRozenite(withBoost, {
 		withRozeniteBundleDiscoveryPlugin(withRozeniteRequireProfiler(config)),
 })
 
+const IOS15_COMPAT_DIR = path.resolve(__dirname, 'src/compat/ios15')
+const IOS15_EXACT_ALIASES = {
+	'@expo/ui': path.join(IOS15_COMPAT_DIR, 'expo-ui.tsx'),
+	'@expo/ui/community/menu': path.join(IOS15_COMPAT_DIR, 'expo-ui-menu.tsx'),
+	'@expo/ui/community/segmented-control': path.join(
+		IOS15_COMPAT_DIR,
+		'expo-ui-segmented-control.tsx',
+	),
+	'@expo/ui/community/slider': path.join(
+		IOS15_COMPAT_DIR,
+		'expo-ui-slider.tsx',
+	),
+	'expo-widgets': path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts'),
+}
+const IOS15_NOOP_PREFIXES = [
+	'@expo/ui/jetpack-compose',
+	'@expo/ui/swift-ui',
+	'@expo/ui/',
+	'expo-widgets/',
+]
+
+const prevResolveRequest = config.resolver?.resolveRequest
+config.resolver = {
+	...config.resolver,
+	resolveRequest(context, moduleName, platform) {
+		if (platform === 'ios') {
+			const exactTarget = IOS15_EXACT_ALIASES[moduleName]
+			if (exactTarget) {
+				return {
+					filePath: exactTarget,
+					type: 'sourceFile',
+				}
+			}
+			if (IOS15_NOOP_PREFIXES.some((prefix) => moduleName.startsWith(prefix))) {
+				return {
+					filePath: moduleName.startsWith('expo-widgets/')
+						? path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts')
+						: path.join(IOS15_COMPAT_DIR, 'expo-ui-noop.tsx'),
+					type: 'sourceFile',
+				}
+			}
+		}
+		if (prevResolveRequest) {
+			return prevResolveRequest(context, moduleName, platform)
+		}
+		return context.resolveRequest(context, moduleName, platform)
+	},
+}
+
 module.exports = config

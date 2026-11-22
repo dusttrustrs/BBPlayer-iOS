@@ -1,7 +1,6 @@
-import { Host, Switch } from '@expo/ui'
 import { memo } from 'react'
-
-import useAppStore from '@/hooks/stores/useAppStore'
+import { Switch } from 'react-native'
+import { useTheme } from 'react-native-paper'
 
 type UniversalSwitchProps = {
 	value: boolean
@@ -16,21 +15,18 @@ const UniversalSwitch = memo(function UniversalSwitch({
 	testID,
 	value,
 }: UniversalSwitchProps) {
-	const pureWhiteBackground = useAppStore(
-		(state) => state.settings.pureWhiteBackground,
-	)
+	const { colors } = useTheme()
 	return (
-		<Host
-			matchContents
-			colorScheme={pureWhiteBackground ? 'light' : undefined}
-		>
-			<Switch
-				disabled={disabled}
-				onValueChange={onValueChange}
-				testID={testID}
-				value={value}
-			/>
-		</Host>
+		<Switch
+			disabled={disabled}
+			onValueChange={onValueChange}
+			testID={testID}
+			trackColor={{
+				false: colors.surfaceVariant,
+				true: colors.primary,
+			}}
+			value={value}
+		/>
 	)
 })
 

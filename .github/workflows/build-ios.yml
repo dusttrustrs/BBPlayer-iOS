@@ -1,4 +1,4 @@
-name: Build iOS IPA (Unsigned)
+name: Build iOS 15+ IPA (Unsigned)
 
 on:
   workflow_dispatch: # 支持在 GitHub Actions 页面手动一键触发构建
@@ -10,9 +10,7 @@ on:
         type: string
   push:
     branches:
-      - master
-      - main
-      - dev
+      - old-dev
     paths:
       - 'apps/mobile/**'
       - 'packages/**'
@@ -83,22 +81,6 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           run_install: false
-
-      - name: 📦 为 apps/mobile 预注入 expo-widgets 依赖
-        run: |
-          node -e '
-            const fs = require("fs");
-            const pkgPath = "apps/mobile/package.json";
-            if (fs.existsSync(pkgPath)) {
-              const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-              pkg.dependencies = pkg.dependencies || {};
-              if (!pkg.dependencies["expo-widgets"]) {
-                pkg.dependencies["expo-widgets"] = "~57.0.27";
-                fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2), "utf8");
-                console.log("✅ 已向 apps/mobile/package.json 注入 expo-widgets 依赖");
-              }
-            }
-          '
 
       - name: 🔄 注入横屏播放器 (横屏布局 + 元素飞入编排 + 非播放页锁竖屏)
         run: |
@@ -2261,866 +2243,96 @@ jobs:
               console.log("✅ 已为 (tabs)/my.tsx 补齐横屏左右安全区边距");
             }
           '
-      - name: 🎵 注册并配置 iOS Now Playing Live Activity
+      - name: 🩹 iOS 15.0+ 原生 Podspec 与依赖兼容性修补
         run: |
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
 
-          const activityPath = "apps/mobile/src/features/live-activity/NowPlayingActivity.tsx";
-          const widgetsIndexPath = "apps/mobile/widgets/index.tsx";
-          const bridgePath = "apps/mobile/src/features/live-activity/NowPlayingActivityBridge.tsx";
-          const appConfigPath = "apps/mobile/app.config.ts";
-
-          // 1. 向 app.config.ts 注册 expo-widgets 插件
-          if (fs.existsSync(appConfigPath)) {
-            let appConfig = fs.readFileSync(appConfigPath, "utf8");
-            if (!appConfig.includes("expo-widgets")) {
-              if (!/plugins\s*:\s*\[/.test(appConfig)) {
-                throw new Error("app.config.ts 中未找到 plugins 数组，无法注册 expo-widgets 扩展");
-              }
-              appConfig = appConfig.replace(
-                /plugins\s*:\s*\[/,
-                "plugins: [['expo-widgets', { src: './widgets', groupIdentifier: 'group.com.roitium.bbplayer', frequentUpdates: true }],"
-              );
-              fs.writeFileSync(appConfigPath, appConfig, "utf8");
-              console.log("✅ 已向 app.config.ts 注册 expo-widgets Live Activity 扩展");
-            }
-          }
-
-          fs.mkdirSync(path.dirname(activityPath), { recursive: true });
-          fs.mkdirSync(path.dirname(widgetsIndexPath), { recursive: true });
-
-          // 2. 写入 NowPlayingActivity.tsx
-          const activitySource = [
-            "import { HStack, Image, Text, VStack } from '@expo/ui/swift-ui'",
-            "import { activityBackgroundTint, font, foregroundStyle, padding, widgetURL } from '@expo/ui/swift-ui/modifiers'",
-            "import { createLiveActivity, type LiveActivityLayout } from 'expo-widgets'",
-            "",
-            "export type NowPlayingProps = {",
-            "  title: string",
-            "  artist: string",
-            "  isPlaying?: boolean",
-            "  phase?: number",
-            "  coverPath?: string",
-            "  coverBase64?: string",
-            "  waveTopColor?: string",
-            "  waveMidColor?: string",
-            "  waveBottomColor?: string",
-            "}",
-            "",
-            "export function NowPlayingWidgetLayout(props: NowPlayingProps): LiveActivityLayout {",
-            "  'widget'",
-            "  const title = (props && props.title) || '正在播放'",
-            "  const artist = (props && props.artist) || 'BBPlayer'",
-            "  const titleText = (",
-            "    <Text modifiers={[font({ weight: 'semibold', size: 15 }), foregroundStyle('#FFFFFF')]}>",
-            "      {title}",
-            "    </Text>",
-            "  )",
-            "  const artistText = (",
-            "    <Text modifiers={[font({ size: 13 }), foregroundStyle('#D1D1D6')]}>",
-            "      {artist}",
-            "    </Text>",
-            "  )",
-            "  const bannerView = (",
-            "    <HStack",
-            "      spacing={12}",
-            "      modifiers={[",
-            "        padding({ horizontal: 16, vertical: 14 }),",
-            "        activityBackgroundTint('#1C1C1E'),",
-            "        widgetURL('bbplayer://'),",
-            "      ]}",
-            "    >",
-            "      <Image systemName=\"music.note\" color=\"#FB7299\" />",
-            "      <VStack alignment=\"leading\" spacing={3}>",
-            "        {titleText}",
-            "        {artistText}",
-            "      </VStack>",
-            "      <HStack spacing={8} modifiers={[padding({ leading: 8 })]}>",
-            "        <Image systemName=\"waveform\" color=\"#FB7299\" />",
-            "      </HStack>",
-            "    </HStack>",
-            "  )",
-            "",
-            "  return {",
-            "    banner: bannerView,",
-            "    bannerSmall: bannerView,",
-            "    compactLeading: <Image systemName=\"music.note\" color=\"#FB7299\" />,",
-            "    compactTrailing: <Image systemName=\"waveform\" color=\"#FB7299\" />,",
-            "    minimal: <Image systemName=\"music.note\" color=\"#FB7299\" />,",
-            "    expandedLeading: <Image systemName=\"music.note\" color=\"#FB7299\" />,",
-            "    expandedCenter: (",
-            "      <VStack alignment=\"leading\" spacing={3}>",
-            "        {titleText}",
-            "        {artistText}",
-            "      </VStack>",
-            "    ),",
-            "    expandedTrailing: <Image systemName=\"waveform\" color=\"#FB7299\" />,",
-            "    expandedBottom: (",
-            "      <HStack modifiers={[padding({ horizontal: 12, vertical: 4 })]}>",
-            "        <Text modifiers={[font({ size: 12 }), foregroundStyle('#8E8E93')]}>BBPlayer 正在播放</Text>",
-            "      </HStack>",
-            "    ),",
-            "  }",
-            "}",
-            "",
-            "export const NowPlayingActivity = createLiveActivity<NowPlayingProps>('NowPlayingActivity', NowPlayingWidgetLayout)",
-            "export default NowPlayingActivity",
-            ""
-          ].join("\n");
-          fs.writeFileSync(activityPath, activitySource, "utf8");
-
-          // 3. 写入 widgets/index.tsx (触发 Expo Prebuild 生成 ExpoWidgetsTarget)
-          const widgetsIndexSource = [
-            "'widget'",
-            "import { NowPlayingWidgetLayout, NowPlayingActivity } from '../src/features/live-activity/NowPlayingActivity'",
-            "",
-            "export default NowPlayingWidgetLayout",
-            "export { NowPlayingActivity }",
-            ""
-          ].join("\n");
-          fs.writeFileSync(widgetsIndexPath, widgetsIndexSource, "utf8");
-
-          // 4. 写入 NowPlayingActivityBridge.tsx (严格单例 + 实时封面与主题色渐变同步 + 原生 GCD 音浪脉冲驱动)
-          const bridgeSource = [
-            "import { useCallback, useEffect, useRef } from 'react'",
-            "import { AppState, Platform } from 'react-native'",
-            "import { Orpheus } from '@bbplayer/orpheus'",
-            "import { usePlayerStore } from '@/hooks/stores/usePlayerStore'",
-            "import { NowPlayingActivity, type NowPlayingProps } from './NowPlayingActivity'",
-            "",
-            "type CoverPayload = {",
-            "  coverPath?: string",
-            "  coverBase64?: string",
-            "  waveTopColor?: string",
-            "  waveMidColor?: string",
-            "  waveBottomColor?: string",
-            "}",
-            "",
-            "let syncPromise: Promise<void> = Promise.resolve()",
-            "let lastSentSignature = ''",
-            "let activeInstance: any = null",
-            "let globalPhase = 0",
-            "let lastHeartbeatTs = 0",
-            "const coverCache = new Map<string, CoverPayload>()",
-            "const inflightCoverMap = new Map<string, Promise<CoverPayload>>()",
-            "",
-            "function enqueueSync(task: () => Promise<void>) {",
-            "  syncPromise = syncPromise.catch(() => {}).then(task)",
-            "}",
-            "",
-            "function truncateText(text: string, maxChars: number): string {",
-            "  if (!text) return ''",
-            "  return text.length > maxChars ? text.slice(0, maxChars) : text",
-            "}",
-            "",
-            "function fetchCoverPayload(rawCoverUrl: string): Promise<CoverPayload> {",
-            "  const trimmed = rawCoverUrl.trim()",
-            "  if (!trimmed || typeof Orpheus.prepareLiveActivityCover !== 'function') {",
-            "    return Promise.resolve({})",
-            "  }",
-            "  const cached = coverCache.get(trimmed)",
-            "  if (cached && (cached.coverPath || cached.coverBase64)) {",
-            "    return Promise.resolve(cached)",
-            "  }",
-            "  const existing = inflightCoverMap.get(trimmed)",
-            "  if (existing) return existing",
-            "",
-            "  const task = Orpheus.prepareLiveActivityCover(trimmed)",
-            "    .then((res) => {",
-            "      const payload: CoverPayload = {",
-            "        coverPath: res?.coverPath || undefined,",
-            "        coverBase64: res?.coverBase64 || undefined,",
-            "        waveTopColor: res?.waveTopColor || undefined,",
-            "        waveMidColor: res?.waveMidColor || undefined,",
-            "        waveBottomColor: res?.waveBottomColor || undefined,",
-            "      }",
-            "      if (payload.coverPath || payload.coverBase64) {",
-            "        if (coverCache.size >= 24) {",
-            "          const oldest = coverCache.keys().next().value",
-            "          if (oldest) coverCache.delete(oldest)",
-            "        }",
-            "        coverCache.set(trimmed, payload)",
-            "      }",
-            "      return payload",
-            "    })",
-            "    .catch(() => ({}))",
-            "    .finally(() => {",
-            "      inflightCoverMap.delete(trimmed)",
-            "    })",
-            "",
-            "  inflightCoverMap.set(trimmed, task)",
-            "  return task",
-            "}",
-            "",
-            "async function pruneInstances(maxCount = 1) {",
-            "  try {",
-            "    const instances = NowPlayingActivity.getInstances()",
-            "    if (instances.length > maxCount) {",
-            "      activeInstance = instances[0]",
-            "      const toKill = instances.slice(maxCount)",
-            "      await Promise.all(toKill.map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "    } else if (instances.length === 1) {",
-            "      activeInstance = instances[0]",
-            "    }",
-            "  } catch {",
-            "    // 忽略异常",
-            "  }",
-            "}",
-            "",
-            "async function endAllInstances() {",
-            "  try {",
-            "    lastSentSignature = ''",
-            "    const target = activeInstance",
-            "    activeInstance = null",
-            "    if (target) {",
-            "      await target.end('immediate').catch(() => undefined)",
-            "    }",
-            "    const instances = NowPlayingActivity.getInstances()",
-            "    if (instances.length > 0) {",
-            "      await Promise.all(instances.map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "    }",
-            "  } catch {",
-            "    // 忽略异常",
-            "  }",
-            "}",
-            "",
-            "async function pushPropsToSingleActivity(props: NowPlayingProps, force = false) {",
-            "  const sig = `${props.title}|${props.artist}|${props.isPlaying ? 1 : 0}|${props.phase ?? 0}|${props.waveTopColor ?? ''}|${props.waveMidColor ?? ''}|${props.waveBottomColor ?? ''}|${props.coverPath ?? ''}|${(props.coverBase64 ?? '').slice(0, 24)}:${(props.coverBase64 ?? '').length}`",
-            "  let instances = NowPlayingActivity.getInstances()",
-            "",
-            "  if (instances.length > 1) {",
-            "    const extras = instances.slice(1)",
-            "    await Promise.all(extras.map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "    instances = [instances[0]]",
-            "  }",
-            "",
-            "  const primary = instances[0] || activeInstance",
-            "  if (!force && sig === lastSentSignature && primary && instances.length === 1) {",
-            "    return",
-            "  }",
-            "",
-            "  if (primary) {",
-            "    try {",
-            "      await primary.update(props)",
-            "      activeInstance = primary",
-            "      lastSentSignature = sig",
-            "      return",
-            "    } catch {",
-            "      activeInstance = null",
-            "    }",
-            "  }",
-            "",
-            "  const retryInstances = NowPlayingActivity.getInstances()",
-            "  if (retryInstances.length > 0) {",
-            "    if (retryInstances.length > 1) {",
-            "      await Promise.all(retryInstances.slice(1).map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "    }",
-            "    try {",
-            "      await retryInstances[0].update(props)",
-            "      activeInstance = retryInstances[0]",
-            "      lastSentSignature = sig",
-            "      return",
-            "    } catch {",
-            "      await Promise.all(retryInstances.map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "    }",
-            "  }",
-            "",
-            "  const created = NowPlayingActivity.start(props, 'bbplayer://')",
-            "  activeInstance = created",
-            "  lastSentSignature = sig",
-            "",
-            "  const afterInstances = NowPlayingActivity.getInstances()",
-            "  if (afterInstances.length > 1) {",
-            "    activeInstance = afterInstances[0]",
-            "    await Promise.all(afterInstances.slice(1).map((i: any) => i.end('immediate').catch(() => undefined)))",
-            "  }",
-            "}",
-            "",
-            "export function NowPlayingActivityBridge() {",
-            "  const internalTrack = usePlayerStore((state) => state.internalTrack)",
-            "  const orpheusTrack = usePlayerStore((state) => state.orpheusTrack)",
-            "  const isMountedRef = useRef(true)",
-            "",
-            "  const syncNowPlaying = useCallback((force = false, phaseOverride?: number) => {",
-            "    if (Platform.OS !== 'ios') return",
-            "",
-            "    enqueueSync(async () => {",
-            "      if (!isMountedRef.current) return",
-            "",
-            "      try {",
-            "        const state = usePlayerStore.getState()",
-            "        const liveOrpheus = state.orpheusTrack || (await Orpheus.getCurrentTrack().catch(() => null))",
-            "        const matchedInternal =",
-            "          state.internalTrack && (!liveOrpheus || state.internalTrack.uniqueKey === liveOrpheus.id)",
-            "            ? state.internalTrack",
-            "            : null",
-            "        const track = matchedInternal || liveOrpheus",
-            "",
-            "        if (!track) {",
-            "          await endAllInstances()",
-            "          return",
-            "        }",
-            "",
-            "        const trackKey = String((matchedInternal as any)?.uniqueKey || (liveOrpheus as any)?.id || '')",
-            "        const rawArtist = (track as any).artist ?? (track as any).artists",
-            "        const artistStr = typeof rawArtist === 'string'",
-            "          ? rawArtist",
-            "          : Array.isArray(rawArtist)",
-            "            ? rawArtist.map((item: any) => typeof item === 'string' ? item : item?.name).filter(Boolean).join(', ')",
-            "            : rawArtist?.name ?? ''",
-            "",
-            "        const rawCoverUrl = String(",
-            "          (matchedInternal as any)?.coverUrl ||",
-            "          (liveOrpheus as any)?.artwork ||",
-            "          (track as any)?.coverUrl ||",
-            "          (track as any)?.artwork ||",
-            "          ''",
-            "        ).trim()",
-            "",
-            "        const isPlaying = await Orpheus.getIsPlaying().catch(() => true)",
-            "        let coverPayload: CoverPayload = rawCoverUrl ? (coverCache.get(rawCoverUrl) ?? {}) : {}",
-            "        let coverPendingPromise: Promise<CoverPayload> | null = null",
-            "",
-            "        if (rawCoverUrl && !coverPayload.coverPath && !coverPayload.coverBase64) {",
-            "          coverPendingPromise = fetchCoverPayload(rawCoverUrl)",
-            "          const quickCover = await Promise.race<CoverPayload | null>([",
-            "            coverPendingPromise,",
-            "            new Promise<null>((resolve) => setTimeout(() => resolve(null), 350)),",
-            "          ])",
-            "          if (quickCover && (quickCover.coverPath || quickCover.coverBase64)) {",
-            "            coverPayload = quickCover",
-            "            coverPendingPromise = null",
-            "          }",
-            "        }",
-            "",
-            "        const currentPhase = typeof phaseOverride === 'number' ? phaseOverride : globalPhase",
-            "",
-            "        const props: NowPlayingProps = {",
-            "          title: truncateText(String((track as any).title || '正在播放'), 64),",
-            "          artist: truncateText(artistStr || 'BBPlayer', 48),",
-            "          isPlaying: Boolean(isPlaying),",
-            "          phase: currentPhase,",
-            "          coverPath: coverPayload.coverPath,",
-            "          coverBase64: coverPayload.coverBase64,",
-            "          waveTopColor: coverPayload.waveTopColor,",
-            "          waveMidColor: coverPayload.waveMidColor,",
-            "          waveBottomColor: coverPayload.waveBottomColor,",
-            "        }",
-            "",
-            "        await pushPropsToSingleActivity(props, force)",
-            "",
-            "        if (coverPendingPromise && trackKey) {",
-            "          void coverPendingPromise.then((resolvedCover) => {",
-            "            if (!isMountedRef.current) return",
-            "            if (!resolvedCover.coverPath && !resolvedCover.coverBase64) return",
-            "            const latest = usePlayerStore.getState()",
-            "            const latestKey = String(latest.orpheusTrack?.id || latest.internalTrack?.uniqueKey || '')",
-            "            if (latestKey === trackKey) {",
-            "              syncNowPlaying(true)",
-            "            }",
-            "          })",
-            "        }",
-            "      } catch (err) {",
-            "        console.warn('[LiveActivity] syncActivity error:', err)",
-            "      }",
-            "    })",
-            "  }, [])",
-            "",
-            "  // 1. 冷启动防线",
-            "  useEffect(() => {",
-            "    isMountedRef.current = true",
-            "    if (Platform.OS === 'ios') {",
-            "      enqueueSync(async () => {",
-            "        const state = usePlayerStore.getState()",
-            "        const currentTrack = state.orpheusTrack || state.internalTrack",
-            "        if (!currentTrack) {",
-            "          await endAllInstances()",
-            "        } else {",
-            "          await pruneInstances(1)",
-            "        }",
-            "      })",
-            "    }",
-            "    return () => {",
-            "      isMountedRef.current = false",
-            "    }",
-            "  }, [])",
-            "",
-            "  // 2. 前台唤醒防线",
-            "  useEffect(() => {",
-            "    if (Platform.OS !== 'ios') return",
-            "    const sub = AppState.addEventListener('change', (nextState) => {",
-            "      if (nextState === 'active') {",
-            "        syncNowPlaying(true)",
-            "      }",
-            "    })",
-            "    return () => {",
-            "      sub.remove()",
-            "    }",
-            "  }, [syncNowPlaying])",
-            "",
-            "  // 3. 状态变化同步",
-            "  useEffect(() => {",
-            "    syncNowPlaying()",
-            "  }, [internalTrack, orpheusTrack, syncNowPlaying])",
-            "",
-            "  // 4. 事件监听防线：切歌与播放状态变化即刻同步",
-            "  useEffect(() => {",
-            "    if (Platform.OS !== 'ios') return",
-            "    const subTrack = Orpheus.addListener('onTrackStarted', () => {",
-            "      globalPhase = 0",
-            "      syncNowPlaying(true, 0)",
-            "      void usePlayerStore.getState().sync().then(() => syncNowPlaying())",
-            "    })",
-            "    const subPlaying = Orpheus.addListener('onIsPlayingChanged', (event: any) => {",
-            "      const playing = typeof event?.status === 'boolean' ? event.status : true",
-            "      if (!playing) {",
-            "        globalPhase = 0",
-            "      }",
-            "      syncNowPlaying(true, playing ? globalPhase : 0)",
-            "    })",
-            "    return () => {",
-            "      subTrack.remove()",
-            "      subPlaying.remove()",
-            "    }",
-            "  }, [syncNowPlaying])",
-            "",
-            "  // 5. 持续律动音浪心跳驱动：播放中周期推进 phase，保证实时窗口与灵动岛持续律动 (参考 v1.2.1 正式版)",
-            "  useEffect(() => {",
-            "    if (Platform.OS !== 'ios') return",
-            "    const heartbeat = async () => {",
-            "      try {",
-            "        const isPlaying = await Orpheus.getIsPlaying().catch(() => false)",
-            "        if (!isPlaying) return",
-            "        const instances = NowPlayingActivity.getInstances()",
-            "        if (instances.length === 0) return",
-            "        const state = usePlayerStore.getState()",
-            "        const liveOrpheus = state.orpheusTrack || (await Orpheus.getCurrentTrack().catch(() => null))",
-            "        const matchedInternal =",
-            "          state.internalTrack && (!liveOrpheus || state.internalTrack.uniqueKey === liveOrpheus.id)",
-            "            ? state.internalTrack",
-            "            : null",
-            "        const track = matchedInternal || liveOrpheus",
-            "        if (!track) return",
-            "",
-            "        globalPhase = (globalPhase + 1) % 4",
-            "",
-            "        const rawArtist = (track as any).artist ?? (track as any).artists",
-            "        const artistStr = typeof rawArtist === 'string'",
-            "          ? rawArtist",
-            "          : Array.isArray(rawArtist)",
-            "            ? rawArtist.map((item: any) => typeof item === 'string' ? item : item?.name).filter(Boolean).join(', ')",
-            "            : rawArtist?.name ?? ''",
-            "",
-            "        const rawCoverUrl = String(",
-            "          (matchedInternal as any)?.coverUrl ||",
-            "          (liveOrpheus as any)?.artwork ||",
-            "          (track as any)?.coverUrl ||",
-            "          (track as any)?.artwork ||",
-            "          ''",
-            "        ).trim()",
-            "        const coverPayload: CoverPayload = rawCoverUrl ? (coverCache.get(rawCoverUrl) ?? {}) : {}",
-            "",
-            "        const props: NowPlayingProps = {",
-            "          title: truncateText(String((track as any).title || '正在播放'), 64),",
-            "          artist: truncateText(artistStr || 'BBPlayer', 48),",
-            "          isPlaying: true,",
-            "          phase: globalPhase,",
-            "          coverPath: coverPayload.coverPath,",
-            "          coverBase64: coverPayload.coverBase64,",
-            "          waveTopColor: coverPayload.waveTopColor,",
-            "          waveMidColor: coverPayload.waveMidColor,",
-            "          waveBottomColor: coverPayload.waveBottomColor,",
-            "        }",
-            "        await instances[0].update(props).catch(() => undefined)",
-            "      } catch {",
-            "        // 忽略异常",
-            "      }",
-            "    }",
-            "    const timer = setInterval(() => { void heartbeat() }, 1500)",
-            "    const subPos = Orpheus.addListener('onPositionUpdate', () => {",
-            "      const now = Date.now()",
-            "      if (now - lastHeartbeatTs >= 1400) {",
-            "        lastHeartbeatTs = now",
-            "        void heartbeat()",
-            "      }",
-            "    })",
-            "    return () => {",
-            "      clearInterval(timer)",
-            "      subPos.remove()",
-            "    }",
-            "  }, [])",
-            "",
-            "  return null",
-            "}"
-          ].join("\n");
-          fs.writeFileSync(bridgePath, bridgeSource, "utf8");
-
-          // 5. 挂载单例 Bridge 到根路由 _layout.tsx
-          const layoutPath = "apps/mobile/src/app/_layout.tsx";
-          if (fs.existsSync(layoutPath)) {
-            let layout = fs.readFileSync(layoutPath, "utf8");
-            if (!layout.includes("NowPlayingActivityBridge")) {
-              layout = layout.replace(
-                "import NowPlayingBar from '@/components/NowPlayingBar'",
-                "import NowPlayingBar from '@/components/NowPlayingBar'\nimport { NowPlayingActivityBridge } from '@/features/live-activity/NowPlayingActivityBridge'"
-              );
-              layout = layout.replace(
-                "<NowPlayingBar />",
-                "<NowPlayingActivityBridge />\n\t\t\t\t<NowPlayingBar />"
-              );
-              fs.writeFileSync(layoutPath, layout, "utf8");
-              console.log("✅ 已在根路由 _layout.tsx 挂载唯一 NowPlayingActivityBridge 单例");
-            }
-          }
-
-          // 6. 清理 NowPlayingBar.tsx 中的重复挂载
-          const barPath = "apps/mobile/src/components/NowPlayingBar.tsx";
-          if (fs.existsSync(barPath)) {
-            let bar = fs.readFileSync(barPath, "utf8");
-            if (bar.includes("NowPlayingActivityBridge")) {
-              bar = bar.replace(/import\s+\{\s*NowPlayingActivityBridge\s*\}\s+from\s+['"]@\/features\/live-activity\/NowPlayingActivityBridge['"];?\n?/, "");
-              bar = bar.replace(/<NowPlayingActivityBridge\s*\/>\n?\s*/, "");
-              fs.writeFileSync(barPath, bar, "utf8");
-              console.log("✅ 已从 NowPlayingBar.tsx 清理冗余挂载");
-            }
-          }
-
-          // 8. 覆盖 apps/mobile/src/lib/player/nowPlayingLiveActivity.ts，避免 index.js 双重触发启动产生重复卡片
-          const legacyLiveActivityPath = "apps/mobile/src/lib/player/nowPlayingLiveActivity.ts";
-          if (fs.existsSync(legacyLiveActivityPath)) {
-            fs.writeFileSync(
-              legacyLiveActivityPath,
-              "// 由 NowPlayingActivityBridge 统一管理 Live Activity 单例，此处空置以杜绝双重启动\nexport function initNowPlayingLiveActivity() {}\n",
-              "utf8"
-            );
-            console.log("✅ 已成功中和 legacy nowPlayingLiveActivity.ts，确保单例全局唯一");
-          }
-
-          // 7. 定位所有 expo-widgets 安装目录：
-          //    a) 清空 script_phases，免除脆弱的 JS Bundle 打包脚本调用
-          //    b) 重写 LiveActivity.swift 与 LiveActivityFactory.swift，在原生 ActivityKit 层强制全局单例 (<= 1)
-          //       并内置不受通知中心下拉暂停影响的原生 GCD DispatchSourceTimer 音浪续期引擎
-          function findAllExpoWidgetsDirs() {
-            const found = new Set();
-            const check = (p) => {
-              try {
-                if (fs.existsSync(p)) {
-                  const real = fs.realpathSync(p);
-                  if (fs.existsSync(path.join(real, "ios/ExpoWidgets.podspec"))) {
-                    found.add(real);
-                  }
-                }
-              } catch (e) {}
-            };
-
-            for (const base of ["apps/mobile", "."]) {
-              try {
-                const pkgJson = path.resolve(base, "package.json");
-                if (fs.existsSync(pkgJson)) {
-                  const req = require("module").createRequire(pkgJson);
-                  const resolved = path.dirname(req.resolve("expo-widgets/package.json"));
-                  check(resolved);
-                }
-              } catch (e) {}
-            }
-
-            for (const root of [".", "apps/mobile"]) {
-              const pnpmDir = path.resolve(root, "node_modules/.pnpm");
-              if (fs.existsSync(pnpmDir)) {
-                for (const ent of fs.readdirSync(pnpmDir)) {
-                  if (ent.startsWith("expo-widgets@")) {
-                    check(path.join(pnpmDir, ent, "node_modules/expo-widgets"));
-                  }
-                }
+          // 1. 降级 React Native helpers.rb 中的 min_ios_version_supported (15.1 -> 15.0)
+          function walkFiles(dir, predicate, out = []) {
+            if (!fs.existsSync(dir)) return out;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.name === ".git" || entry.name === "build" || entry.name === "Pods") continue;
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                walkFiles(full, predicate, out);
+              } else if (entry.isFile() && predicate(entry.name, full)) {
+                out.push(full);
               }
             }
-            return Array.from(found);
+            return out;
           }
 
-          const liveActivitySwiftPatch = [
-            "import ExpoModulesCore",
-            "import ActivityKit",
-            "import UIKit",
-            "",
-            "@available(iOS 16.2, *)",
-            "final class LiveActivitySingletonManager {",
-            "  static let shared = LiveActivitySingletonManager()",
-            "  private init() {}",
-            "",
-            "  func recordState(name: String, props: String) {}",
-            "  func stopHeartbeat() {}",
-            "}",
-            "",
-            "final class LiveActivity: SharedObject {",
-            "  let id: String",
-            "  let name: String",
-            "  private var pushTokenObserverTask: Task<Void, Never>?",
-            "",
-            "  init(id: String, name: String) {",
-            "    self.id = id",
-            "    self.name = name",
-            "    super.init()",
-            "  }",
-            "",
-            "  func update(props: String, staleDate: Date? = nil) async throws {",
-            "    guard #available(iOS 16.2, *) else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    let activeList = Activity<LiveActivityAttributes>.activities.filter {",
-            "      $0.activityState == .active || $0.activityState == .stale",
-            "    }",
-            "    let target = activeList.first(where: { $0.id == id }) ?? activeList.first",
-            "",
-            "    guard let survivor = target else {",
-            "      throw LiveActivityNotFoundException(id)",
-            "    }",
-            "",
-            "    let nilContent: ActivityContent<LiveActivityAttributes.ContentState>? = nil",
-            "    for extra in activeList where extra.id != survivor.id {",
-            "      await extra.end(nilContent, dismissalPolicy: .immediate)",
-            "    }",
-            "",
-            "    LiveActivitySingletonManager.shared.recordState(name: name, props: props)",
-            "    let newState = LiveActivityAttributes.ContentState(name: name, props: props)",
-            "    await survivor.update(ActivityContent(state: newState, staleDate: staleDate))",
-            "  }",
-            "",
-            "  func end(dismissalPolicy: LiveActivityDismissalPolicy? = nil, afterDate: Date? = nil, props: String? = nil, contentDate: Date? = nil) async throws {",
-            "    guard #available(iOS 16.2, *) else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    LiveActivitySingletonManager.shared.stopHeartbeat()",
-            "    let policy: ActivityUIDismissalPolicy = dismissalPolicy?.toDismissalPolicy(date: afterDate) ?? .immediate",
-            "",
-            "    let content: ActivityContent<LiveActivityAttributes.ContentState>?",
-            "    if let props {",
-            "      content = ActivityContent(state: LiveActivityAttributes.ContentState(name: name, props: props), staleDate: nil)",
-            "    } else {",
-            "      content = nil",
-            "    }",
-            "",
-            "    let allActivities = Activity<LiveActivityAttributes>.activities",
-            "    for item in allActivities {",
-            "      if let contentDate, #available(iOS 17.2, *) {",
-            "        await item.end(content, dismissalPolicy: policy, timestamp: contentDate)",
-            "      } else {",
-            "        await item.end(content, dismissalPolicy: policy)",
-            "      }",
-            "    }",
-            "  }",
-            "",
-            "  func getPushToken() throws -> String? {",
-            "    guard #available(iOS 16.1, *) else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    let activeList = Activity<LiveActivityAttributes>.activities",
-            "    guard let activity = activeList.first(where: { $0.id == id }) ?? activeList.first else {",
-            "      throw LiveActivityNotFoundException(id)",
-            "    }",
-            "",
-            "    guard let tokenData = activity.pushToken else {",
-            "      return nil",
-            "    }",
-            "",
-            "    return tokenData.reduce(\"\") { $0 + String(format: \"%02x\", $1) }",
-            "  }",
-            "",
-            "  @available(iOS 16.1, *)",
-            "  func observePushTokenUpdates(for activity: Activity<LiveActivityAttributes>, pushNotificationsEnabled: Bool) {",
-            "    guard pushNotificationsEnabled else { return }",
-            "    guard pushTokenObserverTask == nil else { return }",
-            "",
-            "    pushTokenObserverTask = Task { [weak self] in",
-            "      for await data in activity.pushTokenUpdates {",
-            "        let token = data.reduce(\"\") { $0 + String(format: \"%02x\", $1) }",
-            "        self?.emit(event: onTokenReceived, payload: [",
-            "          \"activityId\": activity.id,",
-            "          \"pushToken\": token",
-            "        ])",
-            "      }",
-            "    }",
-            "  }",
-            "",
-            "  override func sharedObjectWillRelease() {",
-            "    pushTokenObserverTask?.cancel()",
-            "    pushTokenObserverTask = nil",
-            "  }",
-            "}",
-            ""
-          ].join("\n");
-
-          const liveActivityFactorySwiftPatch = [
-            "import ExpoModulesCore",
-            "import ActivityKit",
-            "",
-            "final class LiveActivityFactory: SharedObject {",
-            "  let name: String",
-            "  private var instances: [String: LiveActivity] = [:]",
-            "",
-            "  static var pushNotificationsEnabled: Bool {",
-            "    Bundle.main.object(forInfoDictionaryKey: pushNotificationsEnabledKey) as? Bool ?? false",
-            "  }",
-            "",
-            "  init(name: String, layout: String) {",
-            "    self.name = name",
-            "    WidgetsStorage.set(layout, forKey: \"__expo_widgets_live_activity_\\(name)_layout\")",
-            "  }",
-            "",
-            "  func start(props: String, url: URL?, staleDate: Date? = nil) throws -> LiveActivity {",
-            "    guard #available(iOS 16.2, *) else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    guard ActivityAuthorizationInfo().areActivitiesEnabled else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    LiveActivitySingletonManager.shared.recordState(name: name, props: props)",
-            "    let initialState = LiveActivityAttributes.ContentState(name: name, props: props)",
-            "",
-            "    // 原生层强制全局单例：若已存在活动卡片，直接复用并清理多余实例，绝不重复 Activity.request",
-            "    let existing = Activity<LiveActivityAttributes>.activities.filter {",
-            "      $0.activityState == .active || $0.activityState == .stale",
-            "    }",
-            "    if let survivor = existing.first {",
-            "      let extras = Array(existing.dropFirst())",
-            "      Task {",
-            "        let nilContent: ActivityContent<LiveActivityAttributes.ContentState>? = nil",
-            "        for extra in extras {",
-            "          await extra.end(nilContent, dismissalPolicy: .immediate)",
-            "        }",
-            "        await survivor.update(ActivityContent(state: initialState, staleDate: staleDate))",
-            "      }",
-            "      let instance = LiveActivity(id: survivor.id, name: name)",
-            "      instance.observePushTokenUpdates(for: survivor, pushNotificationsEnabled: Self.pushNotificationsEnabled)",
-            "      instances[survivor.id] = instance",
-            "      return instance",
-            "    }",
-            "",
-            "    do {",
-            "      let attributes = LiveActivityAttributes(url: url?.absoluteString)",
-            "      let activity = try Activity.request(",
-            "        attributes: attributes,",
-            "        content: .init(state: initialState, staleDate: staleDate),",
-            "        pushType: LiveActivityFactory.pushNotificationsEnabled ? .token : nil",
-            "      )",
-            "      let instance = LiveActivity(id: activity.id, name: name)",
-            "      instance.observePushTokenUpdates(for: activity, pushNotificationsEnabled: LiveActivityFactory.pushNotificationsEnabled)",
-            "      instances[activity.id] = instance",
-            "      return instance",
-            "    } catch {",
-            "      throw StartLiveActivityException(error.localizedDescription)",
-            "    }",
-            "  }",
-            "",
-            "  func getInstances() throws -> [LiveActivity] {",
-            "    guard #available(iOS 16.2, *) else {",
-            "      throw LiveActivitiesNotSupportedException()",
-            "    }",
-            "",
-            "    let matching = Activity<LiveActivityAttributes>.activities.filter {",
-            "      ($0.activityState == .active || $0.activityState == .stale) && $0.content.state.name == name",
-            "    }",
-            "    if matching.count > 1, let survivor = matching.first {",
-            "      let extras = Array(matching.dropFirst())",
-            "      Task {",
-            "        let nilContent: ActivityContent<LiveActivityAttributes.ContentState>? = nil",
-            "        for extra in extras {",
-            "          await extra.end(nilContent, dismissalPolicy: .immediate)",
-            "        }",
-            "      }",
-            "      let activeIDs = Set([survivor.id])",
-            "      instances = instances.filter { activeIDs.contains($0.key) }",
-            "      if let instance = instances[survivor.id] {",
-            "        instance.observePushTokenUpdates(for: survivor, pushNotificationsEnabled: Self.pushNotificationsEnabled)",
-            "        return [instance]",
-            "      }",
-            "      let instance = LiveActivity(id: survivor.id, name: name)",
-            "      instance.observePushTokenUpdates(for: survivor, pushNotificationsEnabled: Self.pushNotificationsEnabled)",
-            "      instances[survivor.id] = instance",
-            "      return [instance]",
-            "    }",
-            "",
-            "    let activeIDs = Set(matching.map(\\.id))",
-            "    instances = instances.filter { activeIDs.contains($0.key) }",
-            "",
-            "    return matching.map { activity in",
-            "      if let instance = instances[activity.id] {",
-            "        instance.observePushTokenUpdates(for: activity, pushNotificationsEnabled: Self.pushNotificationsEnabled)",
-            "        return instance",
-            "      }",
-            "      let instance = LiveActivity(id: activity.id, name: name)",
-            "      instance.observePushTokenUpdates(for: activity, pushNotificationsEnabled: Self.pushNotificationsEnabled)",
-            "      instances[activity.id] = instance",
-            "      return instance",
-            "    }",
-            "  }",
-            "",
-            "  override func sharedObjectWillRelease() {",
-            "    instances.removeAll()",
-            "  }",
-            "}",
-            ""
-          ].join("\n");
-
-          const targetPkgs = findAllExpoWidgetsDirs();
-          if (targetPkgs.length > 0) {
-            for (const targetPkg of targetPkgs) {
-              console.log("✅ 定位到有效的 expo-widgets 目录:", targetPkg);
-              const podspec = path.join(targetPkg, "ios/ExpoWidgets.podspec");
-              if (fs.existsSync(podspec)) {
-                let p = fs.readFileSync(podspec, "utf8");
-                p = p.replace(/s\.script_phases\s*=\s*\[[\s\S]*?\]/, "s.script_phases = []");
-                fs.writeFileSync(podspec, p, "utf8");
-                console.log("✅ 已将 ExpoWidgets.podspec 的 script_phases 置空 (免除 JS Bundle 预打包)");
-              }
-              const liveActivityFile = path.join(targetPkg, "ios/LiveActivity.swift");
-              const liveActivityFactoryFile = path.join(targetPkg, "ios/LiveActivityFactory.swift");
-              if (fs.existsSync(liveActivityFile)) {
-                fs.writeFileSync(liveActivityFile, liveActivitySwiftPatch, "utf8");
-                console.log("✅ 已注入原生单例 + GCD 音浪脉冲 LiveActivity.swift ->", liveActivityFile);
-              }
-              if (fs.existsSync(liveActivityFactoryFile)) {
-                fs.writeFileSync(liveActivityFactoryFile, liveActivityFactorySwiftPatch, "utf8");
-                console.log("✅ 已注入原生单例防重 LiveActivityFactory.swift ->", liveActivityFactoryFile);
-              }
+          const helperFiles = walkFiles("node_modules", (name, full) => name === "helpers.rb" && full.includes("react-native/scripts/cocoapods"));
+          let helperPatched = 0;
+          for (const f of helperFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            const next = orig.replace(/return\s+['"]15\.[1-9]\d*['"]/g, "return '15.0'");
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              helperPatched++;
             }
-          } else {
-            console.warn("⚠️ 未定位到 expo-widgets 物理安装目录，跳过 podspec 预修剪");
           }
+          console.log(`✅ 已修补 ${helperPatched} 个 react-native helpers.rb -> min_ios_version_supported = '15.0'`);
+
+          // 2. 统一将 node_modules 与 packages 下所有 .podspec 中的 iOS 最低版本 (> 15.0) 降级至 15.0
+          const podspecs = [
+            ...walkFiles("node_modules", (name) => name.endsWith(".podspec")),
+            ...walkFiles("packages", (name) => name.endsWith(".podspec")),
+          ];
+          const reColonIos = /(:ios\s*=>\s*['"])(15\.[1-9]\d*|1[6-9]\.\d+|2\d\.\d+)(['"])/g;
+          const reDeployTarget = /(ios\.deployment_target\s*=\s*['"])(15\.[1-9]\d*|1[6-9]\.\d+|2\d\.\d+)(['"])/g;
+          const rePlatformIos = /(platform\s+:ios\s*,\s*['"])(15\.[1-9]\d*|1[6-9]\.\d+|2\d\.\d+)(['"])/g;
+          let podspecPatched = 0;
+          for (const f of podspecs) {
+            const orig = fs.readFileSync(f, "utf8");
+            const next = orig
+              .replace(reColonIos, "$115.0$3")
+              .replace(reDeployTarget, "$115.0$3")
+              .replace(rePlatformIos, "$115.0$3");
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              podspecPatched++;
+            }
+          }
+          console.log(`✅ 已降级 ${podspecPatched} 个 .podspec 的 iOS 平台基线至 15.0`);
+
+          // 3. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块自动链接
+          const pkgPath = "apps/mobile/package.json";
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          pkg.expo = pkg.expo || {};
+          pkg.expo.autolinking = pkg.expo.autolinking || {};
+          pkg.expo.autolinking.ios = pkg.expo.autolinking.ios || {};
+          const excludes = new Set(Array.isArray(pkg.expo.autolinking.ios.exclude) ? pkg.expo.autolinking.ios.exclude : []);
+          for (const mod of [
+            "@expo/ui",
+            "expo-widgets",
+            "expo-glass-effect",
+            "expo-symbols",
+            "expo-dev-client",
+            "expo-dev-launcher",
+            "expo-dev-menu",
+            "expo-dev-menu-interface",
+          ]) {
+            excludes.add(mod);
+          }
+          pkg.expo.autolinking.ios.exclude = Array.from(excludes);
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, "\t") + "\n", "utf8");
+          console.log("✅ 已确认 iOS autolinking 排除列表:", pkg.expo.autolinking.ios.exclude.join(", "));
           EOF
-      - name: 📱 生成 iOS 原生工程 (Expo Prebuild)
+
+      - name: 📱 生成 iOS 原生工程 (Expo Prebuild - iOS 15.0)
         run: |
           set -o pipefail
           export VERSION_CODE=$(git rev-list --count HEAD)
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "Calculated VERSION_CODE=$VERSION_CODE"
           cd apps/mobile
-          # 关键修复 2：将 react-native-screens 加入 RNRepo iOS 预编译黑名单 (denyList.ios)
-          # 原因：RNRepo 预编译的 RNScreens.xcframework 仅包含文本格式的 .swiftinterface（无二进制 .swiftmodule），
-          # 而 ExpoRouter (Swift) 在 import RNScreens 时会触发 swiftc 的 ModuleInterfaceLoader 启动隔离子编译器，
-          # 该子编译器会强制剥离父进程的所有 -Xcc 参数（包括 -Xcc -ivfsoverlay React-VFS.yaml），导致 RNScreens 伞形头文件报错找不到 <React/RCTEventDispatcherProtocol.h>。
-          # 将 react-native-screens 设为源码编译后，Expo 会将其编译为静态库并生成二进制 RNScreens.swiftmodule，彻底规避 .swiftinterface 子编译问题。
-          node -e '
-            const fs = require("fs");
-            const cfgPath = "rnrepo.config.json";
-            const cfg = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
-            cfg.denyList = cfg.denyList || {};
-            const iosDeny = new Set(Array.isArray(cfg.denyList.ios) ? cfg.denyList.ios : []);
-            iosDeny.add("react-native-screens");
-            cfg.denyList.ios = Array.from(iosDeny);
-            fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n", "utf8");
-            console.log("✅ 已配置 apps/mobile/rnrepo.config.json:", JSON.stringify(cfg));
-          '
-          # 必须带 --no-install，确保在注入 $RNFirebaseDisableSPM 之后再统一执行 pod install
+          # 必须带 --no-install，确保在配置 iOS 15.0 Podfile 与 $RNFirebaseDisableSPM 之后再统一执行 pod install
           npx expo prebuild --platform ios --clean --no-install 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
-          # Expo 会从 package.json 生成 MARKETING_VERSION；这里再次锁定它，防止旧的
-          # ios 工程缓存或 app.config 覆盖 RELEASE_VERSION，导致 IPA 仍显示 1.0.0。
+          # 锁定 MARKETING_VERSION、IPHONEOS_DEPLOYMENT_TARGET=15.0、Podfile.properties.json 与 Podfile
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
@@ -3144,17 +2356,56 @@ jobs:
           for (const projectPath of projectFiles) {
             let project = fs.readFileSync(projectPath, "utf8");
             let updated = project.replace(/MARKETING_VERSION\s*=\s*[^;]+;/g, `MARKETING_VERSION = ${releaseVersion};`);
-            // 统一锁定所有 Target 部署基线为 16.4，与 ExpoUI 模块编译基线严格对齐（避免 swiftmodule 版本不匹配）
-            updated = updated.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, `IPHONEOS_DEPLOYMENT_TARGET = 16.4;`);
+            // 统一锁定所有 Target 部署基线为 15.0，适配 iOS 15.0+ 设备
+            updated = updated.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*[^;]+;/g, `IPHONEOS_DEPLOYMENT_TARGET = 15.0;`);
             if (updated !== project) {
               fs.writeFileSync(projectPath, updated, "utf8");
               projectCount++;
             }
           }
           if (projectFiles.length === 0) throw new Error("Expo prebuild 后未找到 iOS .pbxproj");
-          console.log(`✅ 已锁定 iOS MARKETING_VERSION=${releaseVersion}（更新 ${projectCount} 个工程）`);
+          console.log(`✅ 已锁定 iOS MARKETING_VERSION=${releaseVersion} 与 IPHONEOS_DEPLOYMENT_TARGET=15.0（更新 ${projectCount} 个工程）`);
+
+          // 更新 Podfile.properties.json
+          const podPropsPath = path.join(iosRoot, "Podfile.properties.json");
+          const podProps = fs.existsSync(podPropsPath) ? JSON.parse(fs.readFileSync(podPropsPath, "utf8")) : {};
+          podProps["ios.deploymentTarget"] = "15.0";
+          fs.writeFileSync(podPropsPath, JSON.stringify(podProps, null, 2) + "\n", "utf8");
+          console.log("✅ 已设置 Podfile.properties.json ios.deploymentTarget = 15.0");
+
+          // 更新 Podfile：平台固定为 15.0，注入 $RNFirebaseDisableSPM，并在 post_install 中强制所有 Pods Target 为 15.0
+          const podfilePath = path.join(iosRoot, "Podfile");
+          if (fs.existsSync(podfilePath)) {
+            let podfile = fs.readFileSync(podfilePath, "utf8");
+            if (!podfile.includes("RNFirebaseDisableSPM")) {
+              podfile = "$RNFirebaseDisableSPM = true\n" + podfile;
+            }
+            podfile = podfile.replace(/^platform\s+:ios,.*$/m, "platform :ios, '15.0'");
+            const enforceIos15Snippet = [
+              "    installer.pods_project.build_configurations.each do |config|",
+              "      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'",
+              "    end",
+              "    installer.pods_project.targets.each do |target|",
+              "      target.build_configurations.each do |config|",
+              "        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'",
+              "      end",
+              "    end",
+            ].join("\n");
+            if (!podfile.includes("IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'")) {
+              if (podfile.includes("post_install do |installer|")) {
+                podfile = podfile.replace(
+                  "post_install do |installer|",
+                  "post_install do |installer|\n" + enforceIos15Snippet
+                );
+              } else {
+                podfile += `\npost_install do |installer|\n${enforceIos15Snippet}\nend\n`;
+              }
+            }
+            fs.writeFileSync(podfilePath, podfile, "utf8");
+            console.log("✅ 已将 Podfile 平台锁定为 iOS 15.0 并注入 post_install 部署基线强锁");
+          }
           EOF
-          # 关键修复：确保 Info.plist 中 100% 写入 UIAppFonts 与 ExpoShareIntoAppGroupId
+          # 关键修复：确保 Info.plist 中 100% 写入 UIAppFonts、NSAppTransportSecurity、UIBackgroundModes 与 UIApplicationSceneManifest
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
@@ -3187,10 +2438,6 @@ jobs:
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string MaterialDesignIcons.ttf" "${plistPath}" 2>/dev/null || true`);
               console.log("✅ PlistBuddy: 已追加 UIAppFonts (MaterialDesignIcons.ttf)");
             }
-            if (!content.includes("ExpoShareIntoAppGroupId")) {
-              execSync(`/usr/libexec/PlistBuddy -c "Add :ExpoShareIntoAppGroupId string group.com.roitium.bbplayer" "${plistPath}" 2>/dev/null || true`);
-              console.log("✅ PlistBuddy: 已追加 ExpoShareIntoAppGroupId");
-            }
             if (!content.includes("audio")) {
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "${plistPath}" 2>/dev/null || true`);
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "${plistPath}" 2>/dev/null || true`);
@@ -3198,10 +2445,10 @@ jobs:
             }
             content = fs.readFileSync(plistPath, "utf8");
             if (!content.includes("UIApplicationSceneManifest")) {
-              const sceneManifestXml = "\\t<key>UIApplicationSceneManifest</key>\\n\\t<dict>\\n\\t\\t<key>UIApplicationSupportsMultipleScenes</key>\\n\\t\\t<false/>\\n\\t\\t<key>UISceneConfigurations</key>\\n\\t\\t<dict>\\n\\t\\t\\t<key>UIWindowSceneSessionRoleApplication</key>\\n\\t\\t\\t<array>\\n\\t\\t\\t\\t<dict>\\n\\t\\t\\t\\t\\t<key>UISceneConfigurationName</key>\\n\\t\\t\\t\\t\\t<string>Default Configuration</string>\\n\\t\\t\\t\\t\\t<key>UISceneDelegateClassName</key>\\n\\t\\t\\t\\t\\t<string>EXExpoAppSceneDelegate</string>\\n\\t\\t\\t\\t</dict>\\n\\t\\t\\t</array>\\n\\t\\t</dict>\\n\\t</dict>\\n</dict>\\n</plist>";
+              const sceneManifestXml = "\t<key>UIApplicationSceneManifest</key>\n\t<dict>\n\t\t<key>UIApplicationSupportsMultipleScenes</key>\n\t\t<false/>\n\t\t<key>UISceneConfigurations</key>\n\t\t<dict>\n\t\t\t<key>UIWindowSceneSessionRoleApplication</key>\n\t\t\t<array>\n\t\t\t\t<dict>\n\t\t\t\t\t<key>UISceneConfigurationName</key>\n\t\t\t\t\t<string>Default Configuration</string>\n\t\t\t\t\t<key>UISceneDelegateClassName</key>\n\t\t\t\t\t<string>EXExpoAppSceneDelegate</string>\n\t\t\t\t</dict>\n\t\t\t</array>\n\t\t</dict>\n\t</dict>\n</dict>\n</plist>";
               content = content.replace(new RegExp("</dict>\\s*</plist>"), sceneManifestXml);
               fs.writeFileSync(plistPath, content, "utf8");
-              console.log("✅ Info.plist: 已补齐 UIApplicationSceneManifest 配置 (解决 iOS 27 启动断言闪退)");
+              console.log("✅ Info.plist: 已补齐 UIApplicationSceneManifest 配置 (兼容 iOS 15.0 - iOS 27)");
             }
           }
           function findAppDelegate(dir) {
@@ -3267,376 +2514,16 @@ jobs:
             }
           }
           EOF
-      - name: 🎨 注入纯原生 SwiftUI Now Playing Live Activity (彻底终结空白与黑屏)
-        run: |
-          node << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
 
-          const targetSwiftPath = path.resolve("apps/mobile/ios/ExpoWidgetsTarget/index.swift");
-          const liveActivitySwift = [
-            "import WidgetKit",
-            "import SwiftUI",
-            "import ActivityKit",
-            "import UIKit",
-            "import Foundation",
-            "",
-            "struct LiveActivityAttributes: ActivityAttributes {",
-            "  var url: String?",
-            "",
-            "  public struct ContentState: Codable, Hashable {",
-            "    var name: String",
-            "    var props: String",
-            "",
-            "    public init(name: String, props: String) {",
-            "      self.name = name",
-            "      self.props = props",
-            "    }",
-            "  }",
-            "",
-            "  public init(url: String? = nil) {",
-            "    self.url = url",
-            "  }",
-            "}",
-            "",
-            "struct NowPlayingProps: Codable {",
-            "  var title: String?",
-            "  var artist: String?",
-            "  var isPlaying: Bool?",
-            "  var phase: Int?",
-            "  var coverPath: String?",
-            "  var coverBase64: String?",
-            "  var waveTopColor: String?",
-            "  var waveMidColor: String?",
-            "  var waveBottomColor: String?",
-            "}",
-            "",
-            "private func parseHexColor(_ hex: String?, fallback: Color) -> Color {",
-            "  guard let raw = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {",
-            "    return fallback",
-            "  }",
-            "  let cleaned = raw.hasPrefix(\"#\") ? String(raw.dropFirst()) : raw",
-            "  guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else {",
-            "    return fallback",
-            "  }",
-            "  let r = Double((rgb >> 16) & 0xFF) / 255.0",
-            "  let g = Double((rgb >> 8) & 0xFF) / 255.0",
-            "  let b = Double(rgb & 0xFF) / 255.0",
-            "  return Color(red: r, green: g, blue: b)",
-            "}",
-            "",
-            "@available(iOS 16.1, iOSApplicationExtension 16.1, *)",
-            "struct LiveCoverArtworkView: View {",
-            "  var coverPath: String?",
-            "  var coverBase64: String?",
-            "  var size: CGFloat = 46",
-            "  var cornerRadius: CGFloat = 10",
-            "  var isCircular: Bool = false",
-            "  var iconSize: CGFloat = 20",
-            "  var accentColor: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
-            "",
-            "  private func resolveUIImage() -> UIImage? {",
-            "    if let path = coverPath, !path.isEmpty, FileManager.default.fileExists(atPath: path),",
-            "       let img = UIImage(contentsOfFile: path) {",
-            "      return img",
-            "    }",
-            "    if let b64 = coverBase64, !b64.isEmpty,",
-            "       let data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters),",
-            "       let img = UIImage(data: data) {",
-            "      return img",
-            "    }",
-            "    return nil",
-            "  }",
-            "",
-            "  var body: some View {",
-            "    if let uiImage = resolveUIImage() {",
-            "      if isCircular {",
-            "        Image(uiImage: uiImage)",
-            "          .resizable()",
-            "          .scaledToFill()",
-            "          .frame(width: size, height: size)",
-            "          .clipShape(Circle())",
-            "      } else {",
-            "        Image(uiImage: uiImage)",
-            "          .resizable()",
-            "          .scaledToFill()",
-            "          .frame(width: size, height: size)",
-            "          .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))",
-            "      }",
-            "    } else {",
-            "      ZStack {",
-            "        if isCircular {",
-            "          Circle()",
-            "            .fill(Color(white: 0.2))",
-            "        } else {",
-            "          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)",
-            "            .fill(Color(white: 0.18))",
-            "        }",
-            "        Image(systemName: \"music.note\")",
-            "          .font(.system(size: iconSize, weight: .semibold))",
-            "          .foregroundColor(accentColor)",
-            "      }",
-            "      .frame(width: size, height: size)",
-            "    }",
-            "  }",
-            "}",
-            "",
-            "@available(iOS 16.1, iOSApplicationExtension 16.1, *)",
-            "struct LiveWaveformView: View {",
-            "  var isPlaying: Bool = true",
-            "  var phase: Int = 0",
-            "  var topColor: Color = Color(red: 1.0, green: 158/255, blue: 187/255)",
-            "  var midColor: Color = Color(red: 251/255, green: 114/255, blue: 153/255)",
-            "  var bottomColor: Color = Color(red: 217/255, green: 70/255, blue: 126/255)",
-            "  var barCount: Int = 4",
-            "  var barWidth: CGFloat = 3.2",
-            "  var maxBarHeight: CGFloat = 20",
-            "  var minBarHeight: CGFloat = 3.5",
-            "  var spacing: CGFloat = 2.8",
-            "",
-            "  private let barMatrix: [[CGFloat]] = [",
-            "    [0.35, 0.95, 0.55, 0.85],",
-            "    [0.85, 0.40, 0.90, 0.50],",
-            "    [0.50, 0.85, 0.35, 0.95],",
-            "    [0.90, 0.55, 0.80, 0.40]",
-            "  ]",
-            "",
-            "  private var activeGradient: LinearGradient {",
-            "    LinearGradient(",
-            "      colors: [topColor, midColor, bottomColor],",
-            "      startPoint: .top,",
-            "      endPoint: .bottom",
-            "    )",
-            "  }",
-            "",
-            "  private var pausedGradient: LinearGradient {",
-            "    LinearGradient(",
-            "      colors: [topColor.opacity(0.65), bottomColor.opacity(0.65)],",
-            "      startPoint: .top,",
-            "      endPoint: .bottom",
-            "    )",
-            "  }",
-            "",
-            "  var body: some View {",
-            "    HStack(alignment: .center, spacing: spacing) {",
-            "      ForEach(0..<4, id: \\.self) { idx in",
-            "        let factor = isPlaying ? barMatrix[abs(phase) % 4][idx] : 0.2",
-            "        Capsule(style: .continuous)",
-            "          .fill(isPlaying ? activeGradient : pausedGradient)",
-            "          .frame(",
-            "            width: barWidth,",
-            "            height: max(minBarHeight, maxBarHeight * factor)",
-            "          )",
-            "          .animation(.easeInOut(duration: 0.65), value: phase)",
-            "          .animation(.easeInOut(duration: 0.3), value: isPlaying)",
-            "      }",
-            "    }",
-            "    .frame(height: maxBarHeight)",
-            "  }",
-            "}",
-            "",
-            "struct BBPlayerLiveActivity: Widget {",
-            "  private let defaultTopColor = Color(red: 1.0, green: 158/255, blue: 187/255)",
-            "  private let defaultMidColor = Color(red: 251/255, green: 114/255, blue: 153/255)",
-            "  private let defaultBottomColor = Color(red: 217/255, green: 70/255, blue: 126/255)",
-            "  private let bgDarkColor = Color(red: 28/255, green: 28/255, blue: 30/255)",
-            "",
-            "  var body: some WidgetConfiguration {",
-            "    ActivityConfiguration(for: LiveActivityAttributes.self) { context in",
-            "      let props = parseProps(context.state.props)",
-            "      let title = props.title ?? \"正在播放\"",
-            "      let artist = props.artist ?? \"BBPlayer\"",
-            "      let isPlaying = props.isPlaying ?? true",
-            "      let phase = props.phase ?? 0",
-            "      let topColor = parseHexColor(props.waveTopColor, fallback: defaultTopColor)",
-            "      let midColor = parseHexColor(props.waveMidColor, fallback: defaultMidColor)",
-            "      let bottomColor = parseHexColor(props.waveBottomColor, fallback: defaultBottomColor)",
-            "",
-            "      HStack(spacing: 12) {",
-            "        LiveCoverArtworkView(",
-            "          coverPath: props.coverPath,",
-            "          coverBase64: props.coverBase64,",
-            "          size: 46,",
-            "          cornerRadius: 10,",
-            "          isCircular: false,",
-            "          iconSize: 20,",
-            "          accentColor: midColor",
-            "        )",
-            "",
-            "        VStack(alignment: .leading, spacing: 3) {",
-            "          Text(title)",
-            "            .font(.system(size: 15, weight: .semibold))",
-            "            .foregroundColor(.white)",
-            "            .lineLimit(1)",
-            "          Text(artist)",
-            "            .font(.system(size: 13))",
-            "            .foregroundColor(Color(white: 0.75))",
-            "            .lineLimit(1)",
-            "        }",
-            "",
-            "        Spacer()",
-            "",
-            "        LiveWaveformView(",
-            "          isPlaying: isPlaying,",
-            "          phase: phase,",
-            "          topColor: topColor,",
-            "          midColor: midColor,",
-            "          bottomColor: bottomColor,",
-            "          barCount: 4,",
-            "          barWidth: 3.2,",
-            "          maxBarHeight: 20,",
-            "          minBarHeight: 3.5,",
-            "          spacing: 2.8",
-            "        )",
-            "      }",
-            "      .padding(.horizontal, 16)",
-            "      .padding(.vertical, 14)",
-            "      .activityBackgroundTint(bgDarkColor)",
-            "      .widgetURL(URL(string: context.attributes.url ?? \"bbplayer://\"))",
-            "    } dynamicIsland: { context in",
-            "      let props = parseProps(context.state.props)",
-            "      let title = props.title ?? \"正在播放\"",
-            "      let artist = props.artist ?? \"BBPlayer\"",
-            "      let isPlaying = props.isPlaying ?? true",
-            "      let phase = props.phase ?? 0",
-            "      let topColor = parseHexColor(props.waveTopColor, fallback: defaultTopColor)",
-            "      let midColor = parseHexColor(props.waveMidColor, fallback: defaultMidColor)",
-            "      let bottomColor = parseHexColor(props.waveBottomColor, fallback: defaultBottomColor)",
-            "",
-            "      return DynamicIsland {",
-            "        DynamicIslandExpandedRegion(.leading) {",
-            "          LiveCoverArtworkView(",
-            "            coverPath: props.coverPath,",
-            "            coverBase64: props.coverBase64,",
-            "            size: 40,",
-            "            cornerRadius: 9,",
-            "            isCircular: false,",
-            "            iconSize: 18,",
-            "            accentColor: midColor",
-            "          )",
-            "          .padding(.leading, 4)",
-            "        }",
-            "        DynamicIslandExpandedRegion(.trailing) {",
-            "          LiveWaveformView(",
-            "            isPlaying: isPlaying,",
-            "            phase: phase,",
-            "            topColor: topColor,",
-            "            midColor: midColor,",
-            "            bottomColor: bottomColor,",
-            "            barCount: 4,",
-            "            barWidth: 2.8,",
-            "            maxBarHeight: 18,",
-            "            minBarHeight: 3.0,",
-            "            spacing: 2.5",
-            "          )",
-            "          .padding(.trailing, 8)",
-            "        }",
-            "        DynamicIslandExpandedRegion(.center) {",
-            "          VStack(alignment: .leading, spacing: 2) {",
-            "            Text(title)",
-            "              .font(.system(size: 14, weight: .semibold))",
-            "              .foregroundColor(.white)",
-            "              .lineLimit(1)",
-            "            Text(artist)",
-            "              .font(.system(size: 12))",
-            "              .foregroundColor(Color(white: 0.75))",
-            "              .lineLimit(1)",
-            "          }",
-            "          .padding(.leading, 4)",
-            "        }",
-            "        DynamicIslandExpandedRegion(.bottom) {",
-            "          HStack {",
-            "            Text(\"BBPlayer 正在播放\")",
-            "              .font(.system(size: 11))",
-            "              .foregroundColor(Color(white: 0.6))",
-            "            Spacer()",
-            "          }",
-            "          .padding(.horizontal, 8)",
-            "          .padding(.top, 4)",
-            "        }",
-            "      } compactLeading: {",
-            "        LiveCoverArtworkView(",
-            "          coverPath: props.coverPath,",
-            "          coverBase64: props.coverBase64,",
-            "          size: 20,",
-            "          cornerRadius: 10,",
-            "          isCircular: true,",
-            "          iconSize: 11,",
-            "          accentColor: midColor",
-            "        )",
-            "        .padding(.leading, 4)",
-            "      } compactTrailing: {",
-            "        LiveWaveformView(",
-            "          isPlaying: isPlaying,",
-            "          phase: phase,",
-            "          topColor: topColor,",
-            "          midColor: midColor,",
-            "          bottomColor: bottomColor,",
-            "          barCount: 4,",
-            "          barWidth: 2.2,",
-            "          maxBarHeight: 12,",
-            "          minBarHeight: 2.2,",
-            "          spacing: 2.0",
-            "        )",
-            "        .padding(.trailing, 4)",
-            "      } minimal: {",
-            "        LiveCoverArtworkView(",
-            "          coverPath: props.coverPath,",
-            "          coverBase64: props.coverBase64,",
-            "          size: 20,",
-            "          cornerRadius: 10,",
-            "          isCircular: true,",
-            "          iconSize: 11,",
-            "          accentColor: midColor",
-            "        )",
-            "      }",
-            "      .widgetURL(URL(string: context.attributes.url ?? \"bbplayer://\"))",
-            "    }",
-            "  }",
-            "",
-            "  private func parseProps(_ json: String) -> NowPlayingProps {",
-            "    guard let data = json.data(using: .utf8),",
-            "          let decoded = try? JSONDecoder().decode(NowPlayingProps.self, from: data) else {",
-            "      return NowPlayingProps(title: \"正在播放\", artist: \"BBPlayer\", isPlaying: true, phase: 0)",
-            "    }",
-            "    return decoded",
-            "  }",
-            "}",
-            "",
-            "@main",
-            "struct BBPlayerWidgetsBundle: WidgetBundle {",
-            "  var body: some Widget {",
-            "    if #available(iOS 16.1, iOSApplicationExtension 16.1, *) {",
-            "      BBPlayerLiveActivity()",
-            "    }",
-            "  }",
-            "}",
-            ""
-          ].join("\n");
-
-          fs.mkdirSync(path.dirname(targetSwiftPath), { recursive: true });
-          fs.writeFileSync(targetSwiftPath, liveActivitySwift, "utf8");
-          console.log("🎉 成功向 ExpoWidgetsTarget/index.swift 写入纯原生 SwiftUI Live Activity 代码（实时封面 + 封面主题渐变色音浪）！");
-
-          // 优化 Info.plist 的显示名称
-          const plistPath = path.resolve("apps/mobile/ios/ExpoWidgetsTarget/Info.plist");
-          if (fs.existsSync(plistPath)) {
-            let plist = fs.readFileSync(plistPath, "utf8");
-            plist = plist.replace("<string>ExpoWidgetsTarget</string>", "<string>BBPlayer</string>");
-            fs.writeFileSync(plistPath, plist, "utf8");
-            console.log("✅ 已优化 ExpoWidgetsTarget DisplayName 为 BBPlayer");
-          }
-          EOF
-      - name: 🍎 安装 CocoaPods 依赖
+      - name: 🍎 安装 CocoaPods 依赖 (iOS 15.0 源码编译)
+        env:
+          EXPO_USE_SOURCE: '1'
+          DISABLE_RNREPO: '1'
         run: |
           set -o pipefail
           export NODE_BINARY=$(command -v node)
           cd apps/mobile/ios
-          # 关键修复 3：在 Podfile 顶部安全注入 $RNFirebaseDisableSPM = true（避免用单行 sed 破坏多行语法）
-          grep -q 'RNFirebaseDisableSPM' Podfile || {
-            printf '%s\n%s\n' '$RNFirebaseDisableSPM = true' "$(cat Podfile)" > Podfile
-          }
-          # 关键修复 3.1：预先拉取并缓存 Sentry.xcframework，避免 Ruby open-uri 在 GitHub Releases 偶发 504 Gateway Time-out
+          # 预缓存 Sentry.xcframework，避免 Ruby open-uri 在 GitHub Releases 偶发 504 Gateway Time-out
           SENTRY_CACHE_DIR="$HOME/Library/Caches/sentry-react-native/xcframeworks/9.29.0"
           if [ ! -f "$SENTRY_CACHE_DIR/Sentry.xcframework/Info.plist" ]; then
             echo "📦 预缓存 Sentry.xcframework 9.29.0..."
@@ -3668,34 +2555,32 @@ jobs:
             echo "❌ pod install 连续 3 次失败"
             exit 1
           fi
-          # 防御性检查：若未来 RNRepo 预编译产物的 Swift 主次版本高于当前 Runner 的 Swift 编译器，自动回退为源码编译
-          if ! ruby -e '
-            local = `xcrun swiftc -version`[/Apple Swift version (\d+\.\d+)/, 1]
-            exit 0 unless local
-            Dir.glob("../../../node_modules/**/.rnrepo-cache/**/*.swiftinterface").each do |f|
-              pkg = File.read(f, 2048)[/-interface-compiler-version (\d+\.\d+)/, 1]
-              if pkg && Gem::Version.new(pkg) > Gem::Version.new(local)
-                puts "RNRepo Swift #{pkg} > Local Swift #{local} (#{f})"
-                exit 1
-              end
-            end
-          '; then
-            echo "⚠️ 检测到 RNRepo 预编译包 Swift 版本高于当前 Xcode，自动切换为 DISABLE_RNREPO=1 源码安装..."
-            DISABLE_RNREPO=1 pod install 2>&1 | tee -a "$RUNNER_TEMP/build-ios.log"
+          # 确认未链接 ExpoUI / ExpoWidgets / ExpoGlassEffect / ExpoSymbols
+          echo "🔍 校验 Podfile.lock 确认未包含 iOS 16+ 专属 Pod..."
+          if grep -E "^\s*-\s*(ExpoUI|ExpoWidgets|ExpoGlassEffect|ExpoSymbols)\b" Podfile.lock; then
+            echo "❌ 检测到 iOS 16+ 专属 Pod 仍被链接进 Podfile.lock，请检查 autolinking 排除配置！"
+            exit 1
           fi
-          # 关键修复 4：修复 React-Core-prebuilt + useFrameworks: 'static' 在 Release 构建下的头文件与模块映射问题：
-          # 1) 提前将 React-Core-prebuilt 切换至 Release 切片，防止 xcodebuild 阶段 replace-rncore-version.js 重新解压覆盖补丁。
-          # 2) 将 React.xcframework 内部按子模块嵌套的头文件（如 Headers/React_Core/React/*.h、Headers/Yoga/yoga/*.h 等）
-          #    实体化平铺到磁盘上的 React.xcframework/Headers/ 与各切片的 React.framework/Headers/ 中。
-          #    这样即使 swiftc 在编译任何 .swiftinterface 子模块时剥离了 -Xcc -ivfsoverlay 虚拟文件系统参数，
-          #    Clang 也能直接通过 -F (React.framework/Headers/*.h) 和原生 Swift -I 物理路径找到所有 <React/*.h> 与 <yoga/*.h> 头文件。
-          # 3) 补齐被 expo-modules-autolinking 的 append_macro_flags 覆盖丢失的 .xcconfig 编译参数。
+          echo "✅ Podfile.lock 校验通过：不含 ExpoUI / ExpoWidgets / ExpoGlassEffect / ExpoSymbols"
+          # 修复 React-Core-prebuilt 头文件与模块映射 + 强锁 Pods.xcodeproj 部署基线为 15.0 + 中和启动异常崩溃
           node << 'EOF'
           const fs = require("fs");
           const path = require("path");
           const { execFileSync } = require("child_process");
           const iosDir = process.cwd();
           const podsRoot = path.join(iosDir, "Pods");
+
+          // 双重保险：确保 Pods.xcodeproj 所有 IPHONEOS_DEPLOYMENT_TARGET 均 <= 15.0
+          const podsPbxproj = path.join(podsRoot, "Pods.xcodeproj", "project.pbxproj");
+          if (fs.existsSync(podsPbxproj)) {
+            const orig = fs.readFileSync(podsPbxproj, "utf8");
+            const patched = orig.replace(/IPHONEOS_DEPLOYMENT_TARGET\s*=\s*(15\.[1-9]\d*|1[6-9]\.\d+|2\d\.\d+);/g, "IPHONEOS_DEPLOYMENT_TARGET = 15.0;");
+            if (patched !== orig) {
+              fs.writeFileSync(podsPbxproj, patched, "utf8");
+              console.log("✅ 已再次锁定 Pods.xcodeproj IPHONEOS_DEPLOYMENT_TARGET = 15.0");
+            }
+          }
+
           const prebuiltDir = path.join(podsRoot, "React-Core-prebuilt");
           const xcfwDir = path.join(prebuiltDir, "React.xcframework");
           function copyDirRecursive(srcDir, destDir) {
@@ -3718,13 +2603,10 @@ jobs:
             if (!fs.existsSync(headersRoot)) return 0;
             let count = 0;
             const subdirs = fs.readdirSync(headersRoot, { withFileTypes: true }).filter((d) => d.isDirectory());
-            // 将 Headers/<SubspecName>/<ModulePrefix>/... 实体化平铺到 Headers/<ModulePrefix>/...
             for (const sub of subdirs) {
               const subPath = path.join(headersRoot, sub.name);
               count += copyDirRecursive(subPath, headersRoot);
             }
-            // 对于 React.framework/Headers 切片目录，Clang 通过 -F 查找 `#import <React/Foo.h>` 时
-            // 会直接查找 `React.framework/Headers/Foo.h`，因此同步将 `Headers/React/*` 平铺到 `React.framework/Headers/*`
             if (isFrameworkSlice) {
               const reactSubdir = path.join(headersRoot, "React");
               if (fs.existsSync(reactSubdir)) {
@@ -3734,7 +2616,6 @@ jobs:
             return count;
           }
           if (fs.existsSync(prebuiltDir)) {
-            // 1. 提前将 React-Core-prebuilt 切换至 Release 切片并写入 .last_build_configuration = "Release"
             const rnPkgPath = require.resolve("react-native/package.json", { paths: [iosDir] });
             const rnDir = path.dirname(rnPkgPath);
             const rnVersion = JSON.parse(fs.readFileSync(rnPkgPath, "utf8")).version;
@@ -3747,7 +2628,6 @@ jobs:
                 { cwd: podsRoot, stdio: "inherit" }
               );
             }
-            // 2. 基于 Release 版 React.xcframework 重新生成 React-VFS.yaml
             const vfsTemplatePath = path.join(xcfwDir, "React-VFS-template.yaml");
             const vfsPath = path.join(prebuiltDir, "React-VFS.yaml");
             if (fs.existsSync(vfsTemplatePath)) {
@@ -3757,7 +2637,6 @@ jobs:
               fs.writeFileSync(vfsPath, vfsContent, "utf8");
               console.log(`✅ 已同步更新 Release 版 VFS 映射: ${vfsPath}`);
             }
-            // 3. 实体化平铺 React.xcframework 头文件到磁盘，消除对虚拟文件系统 (VFS) 的强依赖
             let materializedCount = materializeReactHeaders(path.join(xcfwDir, "Headers"), false);
             if (fs.existsSync(xcfwDir)) {
               for (const entry of fs.readdirSync(xcfwDir, { withFileTypes: true })) {
@@ -3770,8 +2649,6 @@ jobs:
               }
             }
             console.log(`✅ 已实体化平铺 ${materializedCount} 个 React.xcframework 头文件到物理磁盘`);
-            // 4. 重新对 Release 版 React.xcframework 应用 Expo 的 modulemap 补丁：
-            //    移除 `framework module React { ... }`（保留 `React_RCTAppDelegate`）
             const fwModuleReactRegex = /framework module React \{[\s\S]*?\n\}\s*/g;
             const modulemapPaths = [path.join(xcfwDir, "Modules", "module.modulemap")];
             if (fs.existsSync(xcfwDir)) {
@@ -3792,7 +2669,6 @@ jobs:
                 }
               }
             }
-            // 5. 遍历 Target Support Files 下所有 .xcconfig，补齐 React-VFS.yaml、modulemap 以及原生 Swift -I 搜索路径
             const targetSupportDir = path.join(podsRoot, "Target Support Files");
             const useFwModulemap = path.join(targetSupportDir, "React-Core-prebuilt", "React-use-frameworks.modulemap");
             const hasUseFwModulemap = fs.existsSync(useFwModulemap);
@@ -3855,72 +2731,72 @@ jobs:
               }
               console.log(`✅ 已为 ${patchedCount} 个 .xcconfig 补齐 React-VFS.yaml / modulemap / Swift -I 编译参数`);
             }
-            // 彻底中和 CocoaPods Pods 中 EXUpdates 的 exception.raise() 与 delegate?.throwException
-            function patchExpoUpdatesPods(rootDir) {
-              if (!fs.existsSync(rootDir)) return;
-              const walk = (dir) => {
-                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
-                  const full = path.join(dir, f.name);
-                  if (f.isDirectory()) {
-                    walk(full);
-                  } else if (f.name === "StartupProcedure.swift") {
-                    let code = fs.readFileSync(full, "utf8");
-                    if (code.includes("exception.raise()")) {
-                      code = code.replace("exception.raise()", "NSLog(\"🚨 [EXUpdates Suppressed Crash] %@: %@\", exception.name.rawValue, exception.reason ?? \"\")");
-                      fs.writeFileSync(full, code, "utf8");
-                      console.log("✅ 已中和 CocoaPods Pods StartupProcedure.swift 中的 exception.raise():", full);
-                    }
-                  } else if (f.name === "ErrorRecovery.swift") {
-                    let code = fs.readFileSync(full, "utf8");
-                    if (code.includes("delegate?.throwException(NSException(")) {
-                      code = code.replace(
-                        "delegate?.throwException(NSException(name: name, reason: reason, userInfo: userInfo))",
-                        "NSLog(\"🚨 [EXUpdates ErrorRecovery Suppressed Crash] %@: %@\", name.rawValue, reason ?? \"\")"
-                      );
-                      fs.writeFileSync(full, code, "utf8");
-                      console.log("✅ 已中和 CocoaPods Pods ErrorRecovery.swift 中的 delegate?.throwException:", full);
-                    }
-                  }
-                }
-              };
-              walk(rootDir);
-            }
-            patchExpoUpdatesPods("Pods");
-            patchExpoUpdatesPods("apps/mobile/ios/Pods");
-            // 彻底中和 CocoaPods Pods 中 React Native 的 RCTAssert.m @throw 与 RCTExceptionsManager.mm RCTFatal
-            function patchReactNativeExceptionsPods(rootDir) {
-              if (!fs.existsSync(rootDir)) return;
-              const walk = (dir) => {
-                for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
-                  const full = path.join(dir, f.name);
-                  if (f.isDirectory()) {
-                    walk(full);
-                  } else if (f.name === "RCTAssert.m") {
-                    let code = fs.readFileSync(full, "utf8");
-                    const throwPattern = /@throw\s+\[\[NSException\s+alloc\]\s+initWithName:name\s+reason:message\s+userInfo:userInfo\];/;
-                    if (throwPattern.test(code)) {
-                      code = code.replace(throwPattern, 'NSLog(@"🚨 [RCTFatal Suppressed] %@: %@", name, message);');
-                      fs.writeFileSync(full, code, "utf8");
-                      console.log("✅ 已中和 CocoaPods Pods RCTAssert.m 中的 @throw:", full);
-                    }
-                  } else if (f.name === "RCTExceptionsManager.mm") {
-                    let code = fs.readFileSync(full, "utf8");
-                    const fatalCall = "RCTFatal([NSError errorWithDomain:RCTErrorDomain code:0 userInfo:errorInfo]);";
-                    if (code.includes(fatalCall)) {
-                      code = code.replace(fatalCall, 'NSLog(@"🚨 [RCTExceptionsManager Suppressed Fatal] %@", description);');
-                      fs.writeFileSync(full, code, "utf8");
-                      console.log("✅ 已中和 CocoaPods Pods RCTExceptionsManager.mm 中的 RCTFatal 调用:", full);
-                    }
-                  }
-                }
-              };
-              walk(rootDir);
-            }
-            patchReactNativeExceptionsPods("Pods");
-            patchReactNativeExceptionsPods("apps/mobile/ios/Pods");
           }
+          // 彻底中和 CocoaPods Pods 中 EXUpdates 的 exception.raise() 与 delegate?.throwException
+          function patchExpoUpdatesPods(rootDir) {
+            if (!fs.existsSync(rootDir)) return;
+            const walk = (dir) => {
+              for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, f.name);
+                if (f.isDirectory()) {
+                  walk(full);
+                } else if (f.name === "StartupProcedure.swift") {
+                  let code = fs.readFileSync(full, "utf8");
+                  if (code.includes("exception.raise()")) {
+                    code = code.replace("exception.raise()", "NSLog(\"🚨 [EXUpdates Suppressed Crash] %@: %@\", exception.name.rawValue, exception.reason ?? \"\")");
+                    fs.writeFileSync(full, code, "utf8");
+                    console.log("✅ 已中和 CocoaPods Pods StartupProcedure.swift 中的 exception.raise():", full);
+                  }
+                } else if (f.name === "ErrorRecovery.swift") {
+                  let code = fs.readFileSync(full, "utf8");
+                  if (code.includes("delegate?.throwException(NSException(")) {
+                    code = code.replace(
+                      "delegate?.throwException(NSException(name: name, reason: reason, userInfo: userInfo))",
+                      "NSLog(\"🚨 [EXUpdates ErrorRecovery Suppressed Crash] %@: %@\", name.rawValue, reason ?? \"\")"
+                    );
+                    fs.writeFileSync(full, code, "utf8");
+                    console.log("✅ 已中和 CocoaPods Pods ErrorRecovery.swift 中的 delegate?.throwException:", full);
+                  }
+                }
+              }
+            };
+            walk(rootDir);
+          }
+          patchExpoUpdatesPods("Pods");
+          patchExpoUpdatesPods("apps/mobile/ios/Pods");
+          function patchReactNativeExceptionsPods(rootDir) {
+            if (!fs.existsSync(rootDir)) return;
+            const walk = (dir) => {
+              for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+                const full = path.join(dir, f.name);
+                if (f.isDirectory()) {
+                  walk(full);
+                } else if (f.name === "RCTAssert.m") {
+                  let code = fs.readFileSync(full, "utf8");
+                  const throwPattern = /@throw\s+\[\[NSException\s+alloc\]\s+initWithName:name\s+reason:message\s+userInfo:userInfo\];/;
+                  if (throwPattern.test(code)) {
+                    code = code.replace(throwPattern, 'NSLog(@"🚨 [RCTFatal Suppressed] %@: %@", name, message);');
+                    fs.writeFileSync(full, code, "utf8");
+                    console.log("✅ 已中和 CocoaPods Pods RCTAssert.m 中的 @throw:", full);
+                  }
+                } else if (f.name === "RCTExceptionsManager.mm") {
+                  let code = fs.readFileSync(full, "utf8");
+                  const fatalCall = "RCTFatal([NSError errorWithDomain:RCTErrorDomain code:0 userInfo:errorInfo]);";
+                  if (code.includes(fatalCall)) {
+                    code = code.replace(fatalCall, 'NSLog(@"🚨 [RCTExceptionsManager Suppressed Fatal] %@", description);');
+                    fs.writeFileSync(full, code, "utf8");
+                    console.log("✅ 已中和 CocoaPods Pods RCTExceptionsManager.mm 中的 RCTFatal 调用:", full);
+                  }
+                }
+              }
+            };
+            walk(rootDir);
+          }
+          patchReactNativeExceptionsPods("Pods");
+          patchReactNativeExceptionsPods("apps/mobile/ios/Pods");
           EOF
-      - name: 🔨 编译 iOS App (禁用代码签名)
+
+      - name: 🔨 编译 iOS App (iOS 15.0+, 禁用代码签名)
         env:
           SENTRY_DISABLE_AUTO_UPLOAD: 'true' # 禁用 Sentry 符号表自动上传，防止缺少 Token 报错
           SENTRY_ALLOW_FAILURE: 'true'
@@ -3935,6 +2811,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             MARKETING_VERSION="$RELEASE_VERSION" \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
@@ -3948,6 +2825,7 @@ jobs:
               grep -E "(❌|error:|fatal error:|BUILD FAILED)" "$RUNNER_TEMP/build-ios.log" | tail -n 120 || true
               exit 1
             }
+
       - name: 📄 上传构建错误日志 (仅失败时触发)
         if: failure()
         uses: actions/upload-artifact@v4
@@ -3955,21 +2833,86 @@ jobs:
           name: build-ios-error-log
           path: ${{ runner.temp }}/build-ios.log
           retention-days: 7
-      - name: 🧩 验证 ExpoWidgetsTarget 纯原生扩展架构就绪
+
+      - name: 🛡️ 校验并修补 iOS 15.0+ Mach-O 二进制与动态库兼容性
         run: |
-          node -e '
-            const fs = require("fs");
-            const targetSwift = "apps/mobile/ios/ExpoWidgetsTarget/index.swift";
-            if (fs.existsSync(targetSwift)) {
-              const code = fs.readFileSync(targetSwift, "utf8");
-              if (code.includes("BBPlayerLiveActivity") && code.includes("DynamicIsland")) {
-                console.log("🎉 ExpoWidgetsTarget 纯原生 SwiftUI 实时活动已就绪，完全无需外部 JS Bundle 依赖！");
-              } else {
-                console.warn("⚠️ ExpoWidgetsTarget/index.swift 未包含预期原生结构");
-              }
-            }
-          '
-      - name: 📦 打包为未签名 .ipa
+          set -e
+          cd apps/mobile/ios
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ 未找到编译生成的 .app 文件"
+            exit 1
+          fi
+          echo "=== 1. 检查主应用 Info.plist MinimumOSVersion ==="
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 15.0" "$APP_PATH/Info.plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 15.0" "$APP_PATH/Info.plist"
+          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP_PATH/Info.plist")
+          echo "✅ App MinimumOSVersion = $MIN_OS"
+
+          EXEC_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+          MAIN_BIN="$APP_PATH/$EXEC_NAME"
+
+          check_and_fix_macho() {
+            local BIN="$1"
+            local LABEL="$2"
+            echo "--- 检查 Mach-O: $LABEL ---"
+            xcrun vtool -show-build "$BIN"
+            local MINOS=$(xcrun vtool -show-build "$BIN" | awk '/minos/{print $2; exit}')
+            local SDK=$(xcrun vtool -show-build "$BIN" | awk '/sdk/{print $2; exit}')
+            if [ -n "$MINOS" ] && [ "$MINOS" != "15.0" ]; then
+              # 若高于 15.0 (如 prebuilt hermesvm.framework 为 15.1)，降级 LC_BUILD_VERSION minos 至 15.0 以防止 iOS 15.0 dyld 拒绝加载
+              if awk -v v="$MINOS" 'BEGIN { exit !(v > 15.0) }'; then
+                echo "⚠️ $LABEL 当前 minos=$MINOS (> 15.0)，使用 xcrun vtool 降级 LC_BUILD_VERSION 至 15.0 (sdk=$SDK)..."
+                xcrun vtool -set-build-version ios 15.0 "${SDK:-18.0}" -replace -output "${BIN}.ios15" "$BIN"
+                mv "${BIN}.ios15" "$BIN"
+                chmod +x "$BIN"
+                echo "✅ 降级后 $LABEL 构建版本："
+                xcrun vtool -show-build "$BIN"
+              fi
+            fi
+
+            echo "📋 $LABEL 强依赖动态库 (LC_LOAD_DYLIB) 校验："
+            # 只检查强链接 (LC_LOAD_DYLIB)；弱链接 (LC_LOAD_WEAK_DYLIB) 在 iOS 15 上可安全缺失
+            local STRONG_BAD=$(otool -l "$BIN" | awk '
+              /cmd LC_LOAD_DYLIB/ { strong=1; next }
+              /cmd LC_/ { strong=0; next }
+              strong && /name / { print $2 }
+            ' | grep -E "(ActivityKit|AppIntents|TipKit|Charts|WidgetKit|WorkoutKit|SensitiveContentAnalysis|Translation|LiveCommunicationKit)\.framework" || true)
+            if [ -n "$STRONG_BAD" ]; then
+              echo "❌ 致命错误：$LABEL 存在对 iOS 16+ 系统框架的强链接，iOS 15.0 启动必闪退！"
+              echo "$STRONG_BAD"
+              exit 1
+            fi
+          }
+
+          echo "=== 2. 检查主二进制文件 ==="
+          check_and_fix_macho "$MAIN_BIN" "Main ($EXEC_NAME)"
+          echo "📋 主二进制完整链接列表 (otool -L):"
+          otool -L "$MAIN_BIN"
+
+          echo "=== 3. 检查并修补所有内嵌动态 Frameworks / Dylibs ==="
+          if [ -d "$APP_PATH/Frameworks" ]; then
+            for fw in "$APP_PATH/Frameworks"/*.framework; do
+              [ -d "$fw" ] || continue
+              FW_PLIST="$fw/Info.plist"
+              if [ -f "$FW_PLIST" ]; then
+                /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 15.0" "$FW_PLIST" 2>/dev/null || true
+                FW_EXEC=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$FW_PLIST" 2>/dev/null || basename "$fw" .framework)
+              else
+                FW_EXEC=$(basename "$fw" .framework)
+              fi
+              if [ -f "$fw/$FW_EXEC" ]; then
+                check_and_fix_macho "$fw/$FW_EXEC" "Framework ($FW_EXEC)"
+              fi
+            done
+            for dylib in "$APP_PATH/Frameworks"/*.dylib; do
+              [ -f "$dylib" ] || continue
+              check_and_fix_macho "$dylib" "Dylib ($(basename "$dylib"))"
+            done
+          fi
+          echo "🎉 iOS 15.0+ Mach-O 二进制与动态库兼容性校验全部通过！"
+
+      - name: 📦 打包为未签名 .ipa (iOS 15.0+)
         run: |
           cd apps/mobile/ios
           APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" -type d | head -n 1)
@@ -3983,43 +2926,22 @@ jobs:
             echo "❌ App 版本不匹配：期望 $RELEASE_VERSION，实际 $BUILT_VERSION"
             exit 1
           fi
-          echo "✅ 已验证 IPA 应用版本: $BUILT_VERSION"
+          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP_PATH/Info.plist")
+          if [ "$MIN_OS" != "15.0" ]; then
+            echo "❌ MinimumOSVersion 不匹配：期望 15.0，实际 $MIN_OS"
+            exit 1
+          fi
+          echo "✅ 已验证 IPA 应用版本: $BUILT_VERSION (MinimumOSVersion: $MIN_OS)"
+          rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          echo "🔍 验证 Payload 产物符号表安全性（防御 safeAreaRegions 强符号篡改与非法 EmptyViewVN 跳转）..."
-          node << 'EOF'
-          const fs = require("fs");
-          const path = require("path");
-
-          let badFound = [];
-          function verifyPayload(dir) {
-            for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, ent.name);
-              if (ent.isDirectory()) {
-                verifyPayload(full);
-              } else if (ent.isFile()) {
-                try {
-                  const b = fs.readFileSync(full);
-                  if (b.includes("ExpoSwiftUI") && !b.includes("safeAreaRegions") && b.includes("_$s7SwiftUI9EmptyViewVN")) {
-                    badFound.push(full);
-                  }
-                } catch(e) {}
-              }
-            }
-          }
-          verifyPayload("Payload");
-          if (badFound.length > 0) {
-            console.error("❌ 致命断言失败：以下产物中存在 safeAreaRegions 符号篡改，会导致 iOS 27 启动崩溃！", badFound);
-            process.exit(1);
-          }
-          console.log("🛡️ 终极验证通过：Payload 目录中所有 Mach-O 动态库符号表完好，已杜绝 EmptyViewVN 启动闪退风险！");
-          EOF
-          zip -r -y -q BBPlayer-unsigned.ipa Payload
+          zip -r -y -q BBPlayer-iOS15-unsigned.ipa Payload
           mkdir -p "${GITHUB_WORKSPACE}/dist"
-          mv BBPlayer-unsigned.ipa "${GITHUB_WORKSPACE}/dist/"
-      - name: 🚀 上传 IPA 产物到 GitHub Actions
+          mv BBPlayer-iOS15-unsigned.ipa "${GITHUB_WORKSPACE}/dist/"
+
+      - name: 🚀 上传 iOS 15+ IPA 产物到 GitHub Actions
         uses: actions/upload-artifact@v4
         with:
-          name: BBPlayer-iOS-Unsigned
-          path: dist/BBPlayer-unsigned.ipa
+          name: BBPlayer-iOS15-Unsigned
+          path: dist/BBPlayer-iOS15-unsigned.ipa
           retention-days: 30
