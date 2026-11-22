@@ -1,15 +1,10 @@
 import { DownloadState, Orpheus } from '@bbplayer/orpheus'
 import { useCallback } from 'react'
-import type { MMKV } from 'react-native-mmkv'
-import { useMMKVBoolean } from 'react-native-mmkv'
 
-import { alert } from '@/components/modals/AlertModal'
 import { playlistService } from '@/lib/services/playlistService'
 import type { Track } from '@/types/core/media'
 import { toastAndLogError } from '@/utils/error-handling'
-import { storage } from '@/utils/mmkv'
-import { addToQueue } from '@/utils/player'
-import { getInternalPlayUri } from '@/utils/player'
+import { addToQueue, getInternalPlayUri } from '@/utils/player'
 import toast from '@/utils/toast'
 
 const SCOPE = 'UI.Playlist.Local.Player'
@@ -19,9 +14,6 @@ export function useLocalPlaylistPlayer(
 	isOffline?: boolean,
 	playableOfflineKeys?: Set<string>,
 ) {
-	const [ignoreAlertReplacePlaylist, setIgnoreAlertReplacePlaylist] =
-		useMMKVBoolean('ignore_alert_replace_playlist', storage as MMKV)
-
 	const playAll = useCallback(
 		async (startFromId?: string) => {
 			const tracksResult = await playlistService.getPlaylistTracks(playlistId)
@@ -98,6 +90,9 @@ export function useLocalPlaylistPlayer(
 
 	const handleTrackPress = useCallback(
 		(track: Track) => {
+			if (track.source === 'bilibili' && !track.bilibiliMetadata.videoIsValid) {
+				return
+			}
 			if (
 				isOffline &&
 				playableOfflineKeys &&
@@ -106,33 +101,16 @@ export function useLocalPlaylistPlayer(
 				toast.show('当前无网络，无法播放，请检查网络设置')
 				return
 			}
-			if (!ignoreAlertReplacePlaylist) {
-				alert(
-					'替换播放列表',
-					'点击列表中的单曲会直接替换当前播放列表，是否继续？（下次不再提醒）',
-					[
-						{ text: '取消' },
-						{
-							text: '确定',
-							onPress: () => {
-								setIgnoreAlertReplacePlaylist(true)
-								void playAll(track.uniqueKey)
-							},
-						},
-					],
-					{ cancelable: true },
-				)
-				return
-			}
-			void playAll(track.uniqueKey)
+			void addToQueue({
+				playlistId,
+				tracks: [track],
+				playNow: true,
+				clearQueue: false,
+				startFromKey: track.uniqueKey,
+				playNext: false,
+			})
 		},
-		[
-			ignoreAlertReplacePlaylist,
-			playAll,
-			setIgnoreAlertReplacePlaylist,
-			isOffline,
-			playableOfflineKeys,
-		],
+		[playlistId, isOffline, playableOfflineKeys],
 	)
 
 	return { playAll, handleTrackPress }

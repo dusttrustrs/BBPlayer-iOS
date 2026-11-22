@@ -18,6 +18,7 @@ import { Toaster } from 'sonner-native'
 
 import AnimatedBootSplash from '@/components/AnimatedBootSplash'
 import { alert } from '@/components/modals/AlertModal'
+import { CommentImageViewerModal } from '@/components/modals/CommentImageViewerModal'
 import PlayerQueueModal from '@/components/modals/PlayerQueueModal'
 import NowPlayingBar from '@/components/NowPlayingBar'
 import AppProviders from '@/components/providers'
@@ -446,6 +447,7 @@ function RootLayout() {
 				) : null}
 				<Toaster />
 				<PlayerQueueModal />
+				<CommentImageViewerModal />
 				<NowPlayingBar />
 			</AppProviders>
 			<AnimatedBootSplash ready={isReady && migrationsSuccess} />

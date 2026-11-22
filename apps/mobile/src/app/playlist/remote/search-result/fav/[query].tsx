@@ -1,11 +1,12 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { RefreshControl, StyleSheet, View } from 'react-native'
-import { Appbar, Text, useTheme } from 'react-native-paper'
+import { Text, useTheme } from 'react-native-paper'
 
 import { PlaylistError } from '@/features/playlist/remote/components/PlaylistError'
 import { TrackList } from '@/features/playlist/remote/components/RemoteTrackList'
 import { useTrackSelection } from '@/features/playlist/remote/hooks/useTrackSelection'
+import { SearchResultHeader } from '@/features/playlist/remote/search-result/components/SearchResultHeader'
 import { useSearchInteractions } from '@/features/playlist/remote/search-result/hooks/useSearchInteractions'
 import { PlaylistTrackListSkeleton } from '@/features/playlist/skeletons/PlaylistSkeleton'
 import {
@@ -97,6 +98,32 @@ export default function SearchResultsPage() {
 
 	const { trackMenuItems, playTrack } = useSearchInteractions()
 
+	const handleSubmitSearch = useCallback(
+		(nextQuery: string) => {
+			router.replace({
+				pathname: '/playlist/remote/search-result/fav/[query]',
+				params: { query: nextQuery },
+			})
+		},
+		[router],
+	)
+
+	const handleBatchAdd = useCallback(() => {
+		const payloads = []
+		for (const id of selected) {
+			const track = tracks.find((t) => t.id === id)
+			if (track) {
+				payloads.push({
+					track: track as Track,
+					artist: track.artist!,
+				})
+			}
+		}
+		openModal('BatchAddTracksToLocalPlaylist', {
+			payloads,
+		})
+	}, [openModal, selected, tracks])
+
 	if (isPendingSearchData || !isListReady) {
 		return <PlaylistTrackListSkeleton animate={isListReady} />
 	}
@@ -107,47 +134,17 @@ export default function SearchResultsPage() {
 
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
-			<Appbar.Header elevated>
-				<Appbar.BackAction
-					onPress={() => {
-						if (selectMode) {
-							exitSelectMode()
-						} else {
-							router.back()
-						}
-					}}
-				/>
-				<Appbar.Content
-					title={
-						selectMode
-							? `已选择\u2009${selected.size}\u2009首`
-							: `搜索结果\u2009-\u2009${query}`
-					}
-					onPress={handleDoubleTap}
-				/>
-				{selectMode ? (
-					<>
-						<Appbar.Action
-							icon='playlist-plus'
-							onPress={() => {
-								const payloads = []
-								for (const id of selected) {
-									const track = tracks.find((t) => t.id === id)
-									if (track) {
-										payloads.push({
-											track: track as Track,
-											artist: track.artist!,
-										})
-									}
-								}
-								openModal('BatchAddTracksToLocalPlaylist', {
-									payloads,
-								})
-							}}
-						/>
-					</>
-				) : null}
-			</Appbar.Header>
+			<SearchResultHeader
+				query={query ?? ''}
+				selectMode={selectMode}
+				selectedCount={selected.size}
+				onExitSelectMode={exitSelectMode}
+				onBack={() => router.back()}
+				onDoubleTap={handleDoubleTap}
+				onSubmitSearch={handleSubmitSearch}
+				onBatchAdd={handleBatchAdd}
+				placeholder='搜索收藏夹内视频'
+			/>
 
 			<View style={styles.listContainer}>
 				<TrackList

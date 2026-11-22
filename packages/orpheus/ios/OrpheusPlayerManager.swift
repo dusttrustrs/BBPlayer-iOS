@@ -199,6 +199,15 @@ class OrpheusPlayerManager: NSObject {
             }
             setQueue(tracks, startIndex: startIndex)
         } else {
+            if tracks.count == 1,
+               let startId = startFromId,
+               startId == tracks[0].id,
+               let existingIndex = queueManager.getQueue().firstIndex(where: { $0.id == startId }) {
+                playTrack(at: existingIndex, reason: .playlistChanged)
+                saveState()
+                return
+            }
+
             // Append
             queueManager.append(tracks: tracks)
             

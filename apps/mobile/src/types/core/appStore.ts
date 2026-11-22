@@ -20,6 +20,8 @@ interface Settings {
 	enableSwipeToOpenComments?: boolean
 	enableSwipeToSwitchTrack?: boolean
 	enableIPadMode?: boolean
+	transparentBilibiliCard?: boolean
+	transparentBBPlayerCard?: boolean
 }
 
 interface BilibiliUserSummary {

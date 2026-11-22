@@ -35,6 +35,9 @@ export default function MyPage() {
 	const router = useRouter()
 	const haveTrack = useCurrentTrack()
 	const hideStarPrompt = useAppStore((state) => state.settings.hideStarPrompt)
+	const transparentBBPlayerCard = useAppStore(
+		(state) => state.settings.transparentBBPlayerCard ?? false,
+	)
 	const openModal = useModalStore((state) => state.open)
 	const syncFailuresSheetRef = useRef<TrueSheet>(null)
 	const { data: syncFailures } = useLiveQuery(
@@ -169,7 +172,11 @@ export default function MyPage() {
 						accessibilityLabel='BBPlayer 账号'
 						style={[
 							styles.accountBar,
-							{ backgroundColor: colors.surfaceVariant },
+							{
+								backgroundColor: transparentBBPlayerCard
+									? 'transparent'
+									: colors.surfaceVariant,
+							},
 						]}
 						onPress={() => router.navigate('/settings/account')}
 					>

@@ -146,6 +146,8 @@ export const useAppStore = create<AppState>()(
 					enableSwipeToOpenComments: true,
 					enableSwipeToSwitchTrack: true,
 					enableIPadMode: false,
+					transparentBilibiliCard: false,
+					transparentBBPlayerCard: false,
 				},
 				bilibiliUserInfo: null,
 				bbplayerAccount: null,

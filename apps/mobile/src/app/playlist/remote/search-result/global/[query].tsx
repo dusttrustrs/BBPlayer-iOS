@@ -1,19 +1,22 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { decode } from 'he'
-import { useMemo, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshControl, StyleSheet, View } from 'react-native'
-import { Appbar, Text, useTheme } from 'react-native-paper'
+import { useMMKVObject } from 'react-native-mmkv'
+import { Text, useTheme } from 'react-native-paper'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
 import { PlaylistError } from '@/features/playlist/remote/components/PlaylistError'
 import { TrackList } from '@/features/playlist/remote/components/RemoteTrackList'
 import { useTrackSelection } from '@/features/playlist/remote/hooks/useTrackSelection'
+import { SearchResultHeader } from '@/features/playlist/remote/search-result/components/SearchResultHeader'
 import { SearchUserHeader } from '@/features/playlist/remote/search-result/components/SearchUserHeader'
 import { useSearchInteractions } from '@/features/playlist/remote/search-result/hooks/useSearchInteractions'
 import {
 	PlaylistTrackListSkeleton,
 	TrackListItemSkeletonGroup,
 } from '@/features/playlist/skeletons/PlaylistSkeleton'
+import type { SearchHistoryItem } from '@/features/search/SearchHistory'
 import { useSearchResults } from '@/hooks/queries/bilibili/search'
 import { useScreenTransitionReady } from '@/hooks/router/useScreenTransitionReady'
 import { useModalStore } from '@/hooks/stores/useModalStore'
@@ -21,7 +24,15 @@ import { useDoubleTapScrollToTop } from '@/hooks/ui/useDoubleTapScrollToTop'
 import { analyticsService } from '@/lib/services/analyticsService'
 import type { BilibiliSearchVideo } from '@/types/apis/bilibili'
 import type { BilibiliTrack, Track } from '@/types/core/media'
+import { toastAndLogError } from '@/utils/error-handling'
+import {
+	matchSearchStrategies,
+	navigateWithSearchStrategy,
+} from '@/utils/search'
 import { formatMMSSToSeconds } from '@/utils/time'
+
+const SEARCH_HISTORY_KEY = 'bilibili_search_history'
+const MAX_SEARCH_HISTORY = 10
 
 const mapApiItemToTrack = (apiItem: BilibiliSearchVideo): BilibiliTrack => {
 	return {
@@ -69,6 +80,9 @@ export default function SearchResultsPage() {
 		[selectMode, selected, toggle, enterSelectMode],
 	)
 	const [refreshing, setRefreshing] = useState(false)
+	const [isSearching, setIsSearching] = useState(false)
+	const [searchHistory, setSearchHistory] =
+		useMMKVObject<SearchHistoryItem[]>(SEARCH_HISTORY_KEY)
 	const openModal = useModalStore((state) => state.open)
 
 	const { listRef, handleDoubleTap } = useDoubleTapScrollToTop()
@@ -91,6 +105,53 @@ export default function SearchResultsPage() {
 
 	const { trackMenuItems, playTrack } = useSearchInteractions()
 
+	const addSearchHistory = useCallback(
+		(nextQuery: string) => {
+			if (!nextQuery.trim()) return
+			try {
+				const newItem: SearchHistoryItem = {
+					id: `history_${Date.now()}`,
+					text: nextQuery,
+					timestamp: Date.now(),
+				}
+				const currentHistory = searchHistory ?? []
+				const filtered = currentHistory.filter(
+					(item) => item.text.toLowerCase() !== nextQuery.toLowerCase(),
+				)
+				const newHistory = [newItem, ...filtered].slice(0, MAX_SEARCH_HISTORY)
+				setSearchHistory(newHistory)
+			} catch (error) {
+				toastAndLogError('保存搜索历史失败', error, 'UI.Search')
+			}
+		},
+		[searchHistory, setSearchHistory],
+	)
+
+	const handleSubmitSearch = useCallback(
+		async (nextQuery: string) => {
+			const trimmed = nextQuery.trim()
+			if (!trimmed) return
+			setIsSearching(true)
+			try {
+				const result = await matchSearchStrategies(trimmed)
+				if (result.type === 'SEARCH') {
+					addSearchHistory(result.query)
+					router.replace({
+						pathname: '/playlist/remote/search-result/global/[query]',
+						params: { query: result.query },
+					})
+				} else if (navigateWithSearchStrategy(result, router) === 1) {
+					addSearchHistory(trimmed)
+				}
+			} catch (error) {
+				toastAndLogError('搜索失败，请重试', error, 'UI.Search')
+			} finally {
+				setIsSearching(false)
+			}
+		},
+		[addSearchHistory, router],
+	)
+
 	const uniqueSearchData = useMemo(() => {
 		if (!searchData?.pages) {
 			return []
@@ -110,6 +171,22 @@ export default function SearchResultsPage() {
 		return uniqueTracks.map(mapApiItemToTrack)
 	}, [searchData])
 
+	const handleBatchAdd = useCallback(() => {
+		const payloads = []
+		for (const id of selected) {
+			const track = uniqueSearchData.find((t) => t.id === id)
+			if (track) {
+				payloads.push({
+					track: track as Track,
+					artist: track.artist!,
+				})
+			}
+		}
+		openModal('BatchAddTracksToLocalPlaylist', {
+			payloads,
+		})
+	}, [openModal, selected, uniqueSearchData])
+
 	if (!isListReady) {
 		return <PlaylistTrackListSkeleton animate={isListReady} />
 	}
@@ -120,47 +197,17 @@ export default function SearchResultsPage() {
 
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
-			<Appbar.Header elevated>
-				<Appbar.BackAction
-					onPress={() => {
-						if (selectMode) {
-							exitSelectMode()
-						} else {
-							router.back()
-						}
-					}}
-				/>
-				<Appbar.Content
-					title={
-						selectMode
-							? `已选择\u2009${selected.size}\u2009首`
-							: `搜索结果\u2009-\u2009${query}`
-					}
-					onPress={handleDoubleTap}
-				/>
-				{selectMode ? (
-					<>
-						<Appbar.Action
-							icon='playlist-plus'
-							onPress={() => {
-								const payloads = []
-								for (const id of selected) {
-									const track = uniqueSearchData.find((t) => t.id === id)
-									if (track) {
-										payloads.push({
-											track: track as Track,
-											artist: track.artist!,
-										})
-									}
-								}
-								openModal('BatchAddTracksToLocalPlaylist', {
-									payloads,
-								})
-							}}
-						/>
-					</>
-				) : null}
-			</Appbar.Header>
+			<SearchResultHeader
+				query={query ?? ''}
+				selectMode={selectMode}
+				selectedCount={selected.size}
+				onExitSelectMode={exitSelectMode}
+				onBack={() => router.back()}
+				onDoubleTap={handleDoubleTap}
+				onSubmitSearch={handleSubmitSearch}
+				onBatchAdd={handleBatchAdd}
+				isSubmitting={isSearching}
+			/>
 
 			<View style={styles.listContainer}>
 				<TrackList

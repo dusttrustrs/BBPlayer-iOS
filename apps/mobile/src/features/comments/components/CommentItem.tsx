@@ -1,18 +1,25 @@
-import { Galeria } from '@nandorojo/galeria'
 import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { memo, useEffect, useMemo, useState } from 'react'
-import { Appearance, StyleSheet, TouchableOpacity, View } from 'react-native'
+import {
+	Appearance,
+	Image as RNImage,
+	StyleSheet,
+	TouchableOpacity,
+	View,
+} from 'react-native'
 import SquircleView from 'react-native-fast-squircle'
 import { Text, useTheme } from 'react-native-paper'
 
 import IconButton from '@/components/common/IconButton'
 import { useLikeComment } from '@/hooks/mutations/bilibili/comments'
+import { useCommentImageViewerStore } from '@/hooks/stores/useCommentImageViewerStore'
 import type {
 	BilibiliCommentEmote,
 	BilibiliCommentItem,
 } from '@/types/apis/bilibili'
 import { toastAndLogError } from '@/utils/error-handling'
+import { resolveBilibiliImageUrl } from '@/utils/imageUrl'
 import { formatRelativeTime } from '@/utils/time'
 
 interface CommentItemProps {
@@ -79,6 +86,35 @@ const parseMessageSegments = (
 	return segments.length > 0
 		? segments
 		: [{ type: 'text', key: 'text-0', text: message }]
+}
+
+const renderReplyMessage = (
+	message: string,
+	emotes: Record<string, BilibiliCommentEmote> | undefined,
+	color: string,
+) => {
+	const segments = parseMessageSegments(message, emotes)
+	return segments.map((segment) => {
+		if (segment.type === 'text') {
+			return (
+				<Text
+					key={segment.key}
+					style={{ color, fontSize: 13, lineHeight: 18 }}
+				>
+					{segment.text}
+				</Text>
+			)
+		}
+		const size = segment.emote.meta?.size === 2 ? 32 : 16
+		return (
+			<RNImage
+				key={segment.key}
+				source={{ uri: segment.emote.url }}
+				style={{ width: size, height: size }}
+				resizeMode='contain'
+			/>
+		)
+	})
 }
 
 const CommentMessage = memo(function CommentMessage({
@@ -199,33 +235,51 @@ export function CommentItem({ item, onReplyPress, bvid }: CommentItemProps) {
 
 					{item.content.pictures && item.content.pictures.length > 0 && (
 						<View style={styles.imagesContainer}>
-							<Galeria
-								urls={item.content.pictures.map((pic) => pic.img_src ?? '')}
-								theme={darkMode ? 'dark' : 'light'}
-							>
-								{item.content.pictures.map((pic, index) => {
-									return (
-										/* oxlint-disable-next-line @typescript-eslint/unbound-method */
-										<Galeria.Image
-											index={index}
-											// oxlint-disable-next-line react/no-array-index-key
-											key={index}
-										>
-											<View
-												style={styles.commentImage}
-												testID='comment-image'
-											>
-												<Image
-													source={{ uri: pic.img_src }}
-													style={styles.commentImageInner}
-													contentFit='contain'
-												/>
-											</View>
-											{/* oxlint-disable-next-line @typescript-eslint/unbound-method */}
-										</Galeria.Image>
-									)
-								})}
-							</Galeria>
+							{item.content.pictures.map((pic, index) => {
+								const formattedUrl =
+									resolveBilibiliImageUrl(pic.img_src, 600) ??
+									(pic.img_src?.startsWith('//')
+										? `https:${pic.img_src}`
+										: pic.img_src?.replace(/^http:/, 'https:')) ??
+									''
+								return (
+									<TouchableOpacity
+										// oxlint-disable-next-line react/no-array-index-key
+										key={index}
+										activeOpacity={0.85}
+										onPress={() => {
+											const rawUrls = (item.content.pictures ?? []).map(
+												(p) => p.img_src ?? '',
+											)
+											const validEntries = rawUrls
+												.map((url, idx) => ({ url, idx }))
+												.filter((entry) => entry.url.length > 0)
+											const targetIndex = validEntries.findIndex(
+												(entry) => entry.idx === index,
+											)
+											useCommentImageViewerStore.getState().open(
+												validEntries.map((entry) => entry.url),
+												targetIndex >= 0 ? targetIndex : 0,
+											)
+										}}
+										style={[
+											styles.commentImage,
+											{ backgroundColor: darkMode ? '#262626' : '#f0f0f0' },
+										]}
+										testID='comment-image'
+									>
+										<Image
+											source={{
+												uri: formattedUrl,
+												headers: { Referer: 'https://www.bilibili.com' },
+											}}
+											style={styles.commentImageInner}
+											contentFit='cover'
+											cachePolicy='disk'
+										/>
+									</TouchableOpacity>
+								)
+							})}
 						</View>
 					)}
 
@@ -273,27 +327,29 @@ export function CommentItem({ item, onReplyPress, bvid }: CommentItemProps) {
 								cornerSmoothing={0.6}
 							>
 								{item.replies.slice(0, 3).map((reply) => (
-									<View
+									<Text
 										key={reply.rpid}
-										style={styles.replyPreviewRow}
+										style={[
+											styles.replyPreviewText,
+											{ color: theme.colors.onSurfaceVariant },
+										]}
 									>
 										<Text
-											style={[
-												styles.replyPreviewText,
-												{
-													color: theme.colors.onSurfaceVariant,
-													fontWeight: 'bold',
-												},
-											]}
+											style={{
+												fontWeight: 'bold',
+												color: theme.colors.onSurfaceVariant,
+												fontSize: 13,
+												lineHeight: 18,
+											}}
 										>
 											{reply.member.uname}:{' '}
 										</Text>
-										<CommentMessage
-											message={reply.content.message}
-											emotes={reply.content.emote}
-											color={theme.colors.onSurfaceVariant}
-										/>
-									</View>
+										{renderReplyMessage(
+											reply.content.message,
+											reply.content.emote,
+											theme.colors.onSurfaceVariant,
+										)}
+									</Text>
 								))}
 								{item.rcount > 3 && (
 									<Text
@@ -393,11 +449,8 @@ const styles = StyleSheet.create({
 	},
 	replyPreviewText: {
 		fontSize: 13,
+		lineHeight: 18,
 		marginBottom: 4,
-	},
-	replyPreviewRow: {
-		flexDirection: 'row',
-		flexWrap: 'wrap',
 	},
 	viewMoreText: {
 		fontSize: 13,

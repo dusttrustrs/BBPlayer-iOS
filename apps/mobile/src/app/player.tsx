@@ -45,6 +45,7 @@ import {
 	playerSliderDragging$,
 } from '@/hooks/stores/playbackContextStore'
 import useAppStore from '@/hooks/stores/useAppStore'
+import { useCommentImageViewerStore } from '@/hooks/stores/useCommentImageViewerStore'
 import { usePlayerChaptersSheetStore } from '@/hooks/stores/usePlayerChaptersSheetStore'
 import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
@@ -284,6 +285,11 @@ export default function PlayerPage() {
 	}, [colorScheme])
 
 	usePreventRemove(isPreventingBack, () => {
+		if (useCommentImageViewerStore.getState().visible) {
+			useCommentImageViewerStore.getState().close()
+			return
+		}
+
 		if (menuVisible) {
 			setMenuVisible(false)
 			return

@@ -37,6 +37,12 @@ export default function AppearanceSettingsPage() {
 	const enableIPadMode = useAppStore(
 		(state) => state.settings.enableIPadMode ?? false,
 	)
+	const transparentBilibiliCard = useAppStore(
+		(state) => state.settings.transparentBilibiliCard ?? false,
+	)
+	const transparentBBPlayerCard = useAppStore(
+		(state) => state.settings.transparentBBPlayerCard ?? false,
+	)
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
 	)
@@ -160,6 +166,43 @@ export default function AppearanceSettingsPage() {
 							setSettings({ pureWhiteBackground: value })
 						}
 						testID='pure-white-background-switch'
+					/>
+				</View>
+				<View style={styles.settingRow}>
+					<View style={styles.settingTextContainer}>
+						<Text>B站账号卡片透明背景</Text>
+						<Text
+							variant='bodySmall'
+							style={{ color: colors.onSurfaceVariant }}
+						>
+							移除「我的」页 B站账号框的深色底色，仅保留头像与文字
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={transparentBilibiliCard}
+						onValueChange={(value) =>
+							setSettings({ transparentBilibiliCard: value })
+						}
+						testID='transparent-bilibili-card-switch'
+					/>
+				</View>
+				<View style={styles.settingRow}>
+					<View style={styles.settingTextContainer}>
+						<Text>BBPlayer 账号卡片透明背景</Text>
+						<Text
+							variant='bodySmall'
+							style={{ color: colors.onSurfaceVariant }}
+						>
+							移除「我的」页 BBPlayer
+							账号卡片的背景底色与边框，使其与页面背景自然融合
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={transparentBBPlayerCard}
+						onValueChange={(value) =>
+							setSettings({ transparentBBPlayerCard: value })
+						}
+						testID='transparent-bbplayer-card-switch'
 					/>
 				</View>
 				<SettingsSectionTitle title='播放器' />
