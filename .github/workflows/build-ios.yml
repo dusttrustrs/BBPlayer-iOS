@@ -2461,9 +2461,49 @@ jobs:
           }
           console.log(`✅ 已修补 ${sceneGeoPatched} 个 SceneGeometry.swift (为 effectiveGeometry 添加 iOS 15.0 兼容回退)`);
 
-          // 6. 为 ExpoModulesJSI Package.swift 注入 -dead_strip_dylibs：
-          //    Swift C++ Interop (SWIFT_IMMORTAL_REFERENCE) 要求编译器基线为 16.4，但会自动链接未使用的 libswift_StringProcessing.dylib；
-          //    注入 -dead_strip_dylibs 可彻底剥离未使用的 iOS 16+ dylib，后续再由 vtool 将其 minos 降至 15.0
+          // 6. 修补 ExpoModulesJSI：
+          //    (a) 替换 JavaScriptRuntime.swift 中的 Swift 5.7+ Regex 字面量 (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/ + wholeMatch)，
+          //        彻底消除对 iOS 16+ 专属 libswift_StringProcessing.dylib 的符号导入；
+          //    (b) 为 Package.swift 注入 -dead_strip_dylibs，防止编译器默认强链接未使用的 iOS 16+ dylib
+          const jsiRuntimeFiles = walkFiles("node_modules", (name, full) =>
+            name === "JavaScriptRuntime.swift" && full.includes("expo-modules-jsi")
+          );
+          const ios15JsIdentCheck = [
+            "    let isValidIdentifier: Bool = {",
+            "      var iter = name.unicodeScalars.makeIterator()",
+            "      guard let first = iter.next() else { return false }",
+            "      let isIdentStart: (UnicodeScalar) -> Bool = { s in",
+            "        let v = s.value",
+            "        return (v >= 0x41 && v <= 0x5A) || (v >= 0x61 && v <= 0x7A) || v == 0x5F || v == 0x24",
+            "      }",
+            "      let isIdentContinue: (UnicodeScalar) -> Bool = { s in",
+            "        let v = s.value",
+            "        return isIdentStart(s) || (v >= 0x30 && v <= 0x39)",
+            "      }",
+            "      guard isIdentStart(first) else { return false }",
+            "      while let next = iter.next() {",
+            "        if !isIdentContinue(next) { return false }",
+            "      }",
+            "      return true",
+            "    }()",
+            "    if !isValidIdentifier {",
+          ].join("\n");
+          let jsiRuntimePatched = 0;
+          for (const f of jsiRuntimeFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            if (!orig.includes("name.wholeMatch(of:")) continue;
+            const next = orig.replace(
+              "    if name.wholeMatch(of: /^[a-zA-Z_$][a-zA-Z0-9_$]*$/) == nil {",
+              ios15JsIdentCheck
+            );
+            if (next.includes("wholeMatch(of:")) {
+              throw new Error(`JavaScriptRuntime.swift 修补不完整: ${f}`);
+            }
+            fs.writeFileSync(f, next, "utf8");
+            jsiRuntimePatched++;
+          }
+          console.log(`✅ 已修补 ${jsiRuntimePatched} 个 ExpoModulesJSI JavaScriptRuntime.swift (移除 Swift Regex 字面量)`);
+
           const spmFiles = walkFiles("node_modules", (name, full) =>
             name === "Package.swift" && full.includes("expo-modules-jsi")
           );
@@ -3142,7 +3182,7 @@ jobs:
                 otool -L "$fw/$FW_EXEC"
                 if [ "$FW_EXEC" = "ExpoModulesJSI" ]; then
                   echo "🔍 ExpoModulesJSI Swift 运行时导入符号 (dyld_info -imports):"
-                  xcrun dyld_info -imports "$fw/$FW_EXEC" | grep -E "swift|Swift|objc" | head -n 120 || true
+                  xcrun dyld_info -imports "$fw/$FW_EXEC" | grep -E "libswift|Swift|swift_" || true
                 fi
               fi
             done
