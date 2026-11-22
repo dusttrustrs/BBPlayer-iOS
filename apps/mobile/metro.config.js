@@ -39,12 +39,6 @@ const withBoost = withBoostConfig(withWorklets, {
 	],
 })
 
-const config = withRozenite(withBoost, {
-	enabled: process.env.WITH_ROZENITE === 'true',
-	enhanceMetroConfig: (config) =>
-		withRozeniteBundleDiscoveryPlugin(withRozeniteRequireProfiler(config)),
-})
-
 const IOS15_COMPAT_DIR = path.resolve(__dirname, 'src/compat/ios15')
 const IOS15_EXACT_ALIASES = {
 	'@expo/ui': path.join(IOS15_COMPAT_DIR, 'expo-ui.tsx'),
@@ -58,40 +52,75 @@ const IOS15_EXACT_ALIASES = {
 		'expo-ui-slider.tsx',
 	),
 	'expo-widgets': path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts'),
+	'expo-glass-effect': path.join(
+		IOS15_COMPAT_DIR,
+		'expo-glass-effect-noop.tsx',
+	),
+	'expo-symbols': path.join(IOS15_COMPAT_DIR, 'expo-symbols-noop.tsx'),
 }
 const IOS15_NOOP_PREFIXES = [
 	'@expo/ui/jetpack-compose',
 	'@expo/ui/swift-ui',
 	'@expo/ui/',
 	'expo-widgets/',
+	'expo-glass-effect/',
+	'expo-symbols/',
 ]
 
-const prevResolveRequest = config.resolver?.resolveRequest
-config.resolver = {
-	...config.resolver,
-	resolveRequest(context, moduleName, platform) {
-		if (platform === 'ios') {
-			const exactTarget = IOS15_EXACT_ALIASES[moduleName]
-			if (exactTarget) {
-				return {
-					filePath: exactTarget,
-					type: 'sourceFile',
-				}
-			}
-			if (IOS15_NOOP_PREFIXES.some((prefix) => moduleName.startsWith(prefix))) {
-				return {
-					filePath: moduleName.startsWith('expo-widgets/')
-						? path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts')
-						: path.join(IOS15_COMPAT_DIR, 'expo-ui-noop.tsx'),
-					type: 'sourceFile',
-				}
-			}
-		}
-		if (prevResolveRequest) {
-			return prevResolveRequest(context, moduleName, platform)
-		}
-		return context.resolveRequest(context, moduleName, platform)
-	},
+function resolveIos15PrefixTarget(moduleName) {
+	if (moduleName.startsWith('expo-widgets/')) {
+		return path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts')
+	}
+	if (moduleName.startsWith('expo-glass-effect/')) {
+		return path.join(IOS15_COMPAT_DIR, 'expo-glass-effect-noop.tsx')
+	}
+	if (moduleName.startsWith('expo-symbols/')) {
+		return path.join(IOS15_COMPAT_DIR, 'expo-symbols-noop.tsx')
+	}
+	return path.join(IOS15_COMPAT_DIR, 'expo-ui-noop.tsx')
 }
 
-module.exports = config
+function applyIos15CompatResolver(metroConfig) {
+	const prevResolveRequest = metroConfig.resolver?.resolveRequest
+	metroConfig.resolver = {
+		...metroConfig.resolver,
+		resolveRequest(context, moduleName, platform) {
+			if (platform === 'ios') {
+				const exactTarget = IOS15_EXACT_ALIASES[moduleName]
+				if (exactTarget) {
+					return {
+						filePath: exactTarget,
+						type: 'sourceFile',
+					}
+				}
+				if (
+					IOS15_NOOP_PREFIXES.some((prefix) => moduleName.startsWith(prefix))
+				) {
+					return {
+						filePath: resolveIos15PrefixTarget(moduleName),
+						type: 'sourceFile',
+					}
+				}
+			}
+			if (prevResolveRequest) {
+				return prevResolveRequest(context, moduleName, platform)
+			}
+			return context.resolveRequest(context, moduleName, platform)
+		},
+	}
+	return metroConfig
+}
+
+const rozeniteConfig = withRozenite(withBoost, {
+	enabled: process.env.WITH_ROZENITE === 'true',
+	enhanceMetroConfig: (cfg) =>
+		withRozeniteBundleDiscoveryPlugin(withRozeniteRequireProfiler(cfg)),
+})
+
+module.exports = async () => {
+	const resolved =
+		typeof rozeniteConfig === 'function'
+			? await rozeniteConfig()
+			: await rozeniteConfig
+	return applyIos15CompatResolver(resolved)
+}

@@ -3296,6 +3296,19 @@ jobs:
               check_and_fix_macho "$dylib" "Dylib ($(basename "$dylib"))"
             done
           fi
+          echo "=== 4. 校验 main.jsbundle 未残留已排除的 iOS 16+ 原生模块调用 ==="
+          JS_BUNDLE="$APP_PATH/main.jsbundle"
+          if [ ! -f "$JS_BUNDLE" ]; then
+            echo "❌ 未找到 main.jsbundle"
+            exit 1
+          fi
+          BAD_JS_MODS=$(grep -a -oE "(ExpoGlassEffect|ExpoUI|SymbolModule|ExpoWidgets)" "$JS_BUNDLE" | sort -u || true)
+          if [ -n "$BAD_JS_MODS" ]; then
+            echo "❌ 致命错误：main.jsbundle 中仍包含已排除的 iOS 16+ 原生模块引用，启动时将触发 RCTExceptionsManager 闪退！"
+            echo "$BAD_JS_MODS"
+            exit 1
+          fi
+          echo "✅ main.jsbundle 校验通过：不含 ExpoGlassEffect / ExpoUI / SymbolModule / ExpoWidgets 引用"
           echo "🎉 iOS 15.0+ Mach-O 二进制与动态库兼容性校验全部通过！"
 
       - name: 📦 打包为未签名 .ipa (iOS 15.0+)
