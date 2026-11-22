@@ -2484,8 +2484,8 @@ jobs:
             const orig = fs.readFileSync(f, "utf8");
             if (!orig.includes("IPHONEOS_DEPLOYMENT_TARGET=15.0")) {
               const next = orig.replace(
-                "CLANG_COVERAGE_MAPPING=NO",
-                "CLANG_COVERAGE_MAPPING=NO \\\n    IPHONEOS_DEPLOYMENT_TARGET=15.0"
+                "    CLANG_COVERAGE_MAPPING=NO \\",
+                "    CLANG_COVERAGE_MAPPING=NO \\\n    IPHONEOS_DEPLOYMENT_TARGET=15.0 \\"
               );
               if (next !== orig) {
                 fs.writeFileSync(f, next, "utf8");
