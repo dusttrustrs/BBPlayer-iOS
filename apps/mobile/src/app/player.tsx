@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
+import { PodcastSubtitles } from '@/features/player/components/lyrics/PodcastSubtitles'
 import { LandscapePlayer } from '@/features/player/components/main/LandscapePlayer'
 import { PlayerChaptersSheet } from '@/features/player/components/main/PlayerChaptersSheet'
 import { PlayerHeader } from '@/features/player/components/main/PlayerHeader'
@@ -84,12 +85,45 @@ function usePageScrollHandler(
 
 const logger = log.extend('App.Player')
 
+const PALETTE_CACHE_LIMIT = 8
+const paletteCache = new Map<string, ExtractedPalette>()
+
+function readCachedPalette(key: string) {
+	if (!key) return undefined
+
+	const cached = paletteCache.get(key)
+
+	if (!cached) return undefined
+
+	// 重新插入，维持 LRU 顺序。
+	paletteCache.delete(key)
+	paletteCache.set(key, cached)
+
+	return cached
+}
+
+function writeCachedPalette(key: string, palette: ExtractedPalette) {
+	if (!key) return
+
+	paletteCache.delete(key)
+	paletteCache.set(key, palette)
+
+	const oldest = paletteCache.keys().next()
+
+	if (paletteCache.size > PALETTE_CACHE_LIMIT && !oldest.done) {
+		paletteCache.delete(oldest.value)
+	}
+}
+
 export default function PlayerPage() {
 	const theme = useTheme()
 	const colors = theme.colors
 	const insets = useSafeAreaInsets()
 	const pagerRef = useRef<PagerView>(null)
 	const currentTrack = useCurrentTrack()
+	const chaptersSheetMounted = usePlayerChaptersSheetStore(
+		(state) => state.isMounted,
+	)
 	const { markInteractive } = useObserve()
 
 	useEffect(() => {
@@ -128,6 +162,17 @@ export default function PlayerPage() {
 	const isFocused = useIsFocused()
 	const isPlaying = useIsPlaying()
 	const [palette, setPalette] = useState<ExtractedPalette | null>(null)
+	// 当前 ImageRef 对应的封面 URL。expo-image 在新图解码完成前会继续返回上一张图，
+	// 只有 ref 真正替换后才能认为新 URL 的封面已就绪。
+	const [loadedCoverUrl, setLoadedCoverUrl] = useState<string | null>(null)
+
+	useEffect(() => {
+		setLoadedCoverUrl(coverRef ? (currentTrackCover ?? null) : null)
+		// currentTrackCover 是有意省略的：它变化时 ImageRef 仍指向上一张封面，
+		// 若此时记录成新 URL，就会把上一首的提色结果缓存到新封面上。
+		// oxlint-disable-next-line react-hooks/exhaustive-deps
+	}, [coverRef])
+
 	const [isForeground, setIsForeground] = useState(
 		AppState.currentState === 'active',
 	)
@@ -220,22 +265,33 @@ export default function PlayerPage() {
 	const [menuVisible, setMenuVisible] = useState(false)
 
 	const jumpTo = (key: string) => {
-		const targetIndex =
-			key === 'lyrics' &&
-			playbackContextStore$.context.mode.peek() !== 'podcast'
-				? 1
-				: 0
+		const targetIndex = key === 'lyrics' ? 1 : 0
+		setIndex(targetIndex)
 		pagerRef.current?.setPage(targetIndex)
 	}
 
 	useEffect(() => {
-		if (!coverRef || !isForeground || pureWhiteBackground) return
+		if (!loadedCoverUrl || pureWhiteBackground) return
+
+		const cached = readCachedPalette(loadedCoverUrl)
+
+		if (cached) {
+			setPalette(cached)
+
+			return
+		}
+
+		if (!coverRef || !isForeground) return
 
 		let cancelled = false
 		// 加载新封面时保留当前配色；新结果到达后由对应背景做过渡。
 		ImageThemeColors.extractThemeColorAsync(coverRef)
 			.then((result) => {
-				if (!cancelled) setPalette(result ?? null)
+				if (cancelled) return
+
+				setPalette(result ?? null)
+
+				if (result) writeCachedPalette(loadedCoverUrl, result)
 			})
 			.catch((e) => {
 				if (cancelled) return
@@ -245,7 +301,7 @@ export default function PlayerPage() {
 		return () => {
 			cancelled = true
 		}
-	}, [coverRef, currentTrackCover, isForeground, pureWhiteBackground])
+	}, [coverRef, loadedCoverUrl, isForeground, pureWhiteBackground])
 
 	const gradientMainColor = useSharedValue(colors.background)
 	const gradientColors = useDerivedValue(() => [
@@ -388,11 +444,7 @@ export default function PlayerPage() {
 							<PlayerHeader
 								onMorePress={() => setMenuVisible(true)}
 								onBack={handleDismiss}
-								index={
-									playbackContextStore$.context.mode.get() === 'podcast'
-										? 0
-										: index
-								}
+								index={index}
 								scrollX={scrollX}
 							/>
 						</Computed>
@@ -413,10 +465,7 @@ export default function PlayerPage() {
 											? 'podcast'
 											: 'music'
 									}
-									scrollEnabled={
-										playbackContextStore$.context.mode.get() !== 'podcast' &&
-										!playerSliderDragging$.get()
-									}
+									scrollEnabled={!playerSliderDragging$.get()}
 									ref={pagerRef}
 									style={styles.tabView}
 									initialPage={0}
@@ -434,26 +483,27 @@ export default function PlayerPage() {
 												onPresent={() => {}}
 											/>
 										</View>,
-										...(playbackContextStore$.context.mode.get() === 'podcast'
-											? []
-											: [
-													<View
-														key='lyrics'
-														style={styles.tabView}
-													>
-														<Lyrics
-															currentIndex={index}
-															onPressBackground={() => jumpTo('main')}
-														/>
-													</View>,
-												]),
+										<View
+											key='lyrics'
+											style={styles.tabView}
+										>
+											{playbackContextStore$.context.mode.get() ===
+											'podcast' ? (
+												<PodcastSubtitles active={index === 1 && isFocused} />
+											) : (
+												<Lyrics
+													currentIndex={index}
+													onPressBackground={() => jumpTo('main')}
+												/>
+											)}
+										</View>,
 									]}
 								</AnimatedPagerView>
 							</Computed>
 						)}
 					</View>
 
-					<PlayerChaptersSheet />
+					{chaptersSheetMounted && <PlayerChaptersSheet />}
 					{!isLandscape && (
 						<PlayerCommentsCard
 							bvid={bvid}

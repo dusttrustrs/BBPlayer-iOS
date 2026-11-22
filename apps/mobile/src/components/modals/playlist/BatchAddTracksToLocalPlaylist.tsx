@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
 		textAlign: 'center',
 	},
 	listContainer: {
-		minHeight: 300,
+		height: 300,
 	},
 	emptyListContainer: {
 		flex: 1,

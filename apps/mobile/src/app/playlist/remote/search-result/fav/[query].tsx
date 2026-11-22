@@ -1,14 +1,19 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useCallback, useMemo, useState } from 'react'
-import { RefreshControl, StyleSheet, View } from 'react-native'
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react'
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native'
 import { Text, useTheme } from 'react-native-paper'
 
 import { PlaylistError } from '@/features/playlist/remote/components/PlaylistError'
 import { TrackList } from '@/features/playlist/remote/components/RemoteTrackList'
 import { useTrackSelection } from '@/features/playlist/remote/hooks/useTrackSelection'
-import { SearchResultHeader } from '@/features/playlist/remote/search-result/components/SearchResultHeader'
+import {
+	type SearchInputOverlayState,
+	SearchResultHeader,
+	type SearchResultHeaderHandle,
+} from '@/features/playlist/remote/search-result/components/SearchResultHeader'
 import { useSearchInteractions } from '@/features/playlist/remote/search-result/hooks/useSearchInteractions'
 import { PlaylistTrackListSkeleton } from '@/features/playlist/skeletons/PlaylistSkeleton'
+import SearchSuggestions from '@/features/search/SearchSuggestions'
 import {
 	useGetFavoritePlaylists,
 	useInfiniteSearchFavoriteItems,
@@ -69,6 +74,19 @@ export default function SearchResultsPage() {
 		[selectMode, selected, toggle, enterSelectMode],
 	)
 	const [refreshing, setRefreshing] = useState(false)
+	const [listHeight, setListHeight] = useState(0)
+	const headerRef = useRef<SearchResultHeaderHandle | null>(null)
+	const [searchOverlayState, setSearchOverlayState] =
+		useState<SearchInputOverlayState>({
+			isOpen: false,
+			query: '',
+			showSuggestions: false,
+		})
+	const deferredSuggestionQuery = useDeferredValue(searchOverlayState.query)
+	const suggestionsVisible =
+		searchOverlayState.showSuggestions &&
+		searchOverlayState.query.trim().length > 0 &&
+		deferredSuggestionQuery.trim().length > 0
 	const openModal = useModalStore((state) => state.open)
 
 	const { listRef, handleDoubleTap } = useDoubleTapScrollToTop()
@@ -108,6 +126,16 @@ export default function SearchResultsPage() {
 		[router],
 	)
 
+	const handleSuggestionPress = useCallback(
+		(nextQuery: string) => {
+			headerRef.current?.collapse(false)
+			const trimmed = nextQuery.trim()
+			if (!trimmed || trimmed === (query ?? '').trim()) return
+			handleSubmitSearch(trimmed)
+		},
+		[handleSubmitSearch, query],
+	)
+
 	const handleBatchAdd = useCallback(() => {
 		const payloads = []
 		for (const id of selected) {
@@ -135,6 +163,7 @@ export default function SearchResultsPage() {
 	return (
 		<View style={[styles.container, { backgroundColor: colors.background }]}>
 			<SearchResultHeader
+				headerRef={headerRef}
 				query={query ?? ''}
 				selectMode={selectMode}
 				selectedCount={selected.size}
@@ -142,11 +171,18 @@ export default function SearchResultsPage() {
 				onBack={() => router.back()}
 				onDoubleTap={handleDoubleTap}
 				onSubmitSearch={handleSubmitSearch}
+				onSearchStateChange={setSearchOverlayState}
 				onBatchAdd={handleBatchAdd}
 				placeholder='搜索收藏夹内视频'
 			/>
 
-			<View style={styles.listContainer}>
+			<View
+				style={styles.listContainer}
+				onLayout={({ nativeEvent }) => {
+					const nextHeight = Math.floor(nativeEvent.layout.height)
+					setListHeight((prev) => (prev === nextHeight ? prev : nextHeight))
+				}}
+			>
 				<TrackList
 					listRef={listRef}
 					tracks={tracks}
@@ -177,6 +213,24 @@ export default function SearchResultsPage() {
 						</Text>
 					}
 				/>
+				{searchOverlayState.isOpen && (
+					<Pressable
+						style={styles.suggestionsBackdrop}
+						onPress={() => headerRef.current?.collapse(false)}
+						accessibilityLabel='收起搜索建议'
+					/>
+				)}
+				<View
+					pointerEvents='box-none'
+					style={styles.suggestionsOverlay}
+				>
+					<SearchSuggestions
+						query={deferredSuggestionQuery}
+						visible={suggestionsVisible}
+						availableHeight={Math.max(0, listHeight - 24)}
+						onSuggestionPress={handleSuggestionPress}
+					/>
+				</View>
 			</View>
 		</View>
 	)
@@ -188,6 +242,18 @@ const styles = StyleSheet.create({
 	},
 	listContainer: {
 		flex: 1,
+		position: 'relative',
+	},
+	suggestionsBackdrop: {
+		...StyleSheet.absoluteFill,
+		zIndex: 15,
+	},
+	suggestionsOverlay: {
+		position: 'absolute',
+		top: 8,
+		left: 16,
+		right: 16,
+		zIndex: 20,
 	},
 	emptyListText: {
 		paddingVertical: 32,

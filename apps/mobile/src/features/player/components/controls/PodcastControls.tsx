@@ -58,7 +58,7 @@ export function PodcastControls() {
 	return (
 		<View>
 			<View style={{ marginTop: 24 }}>
-				<MainPlaybackControls />
+				<MainPlaybackControls podcast />
 			</View>
 			<SecondaryPlaybackControls>
 				{actions.map((action) => (

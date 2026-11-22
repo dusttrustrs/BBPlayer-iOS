@@ -26,6 +26,13 @@ export function PlayerChaptersSheet() {
 	const [seeking, setSeeking] = useState(false)
 
 	useEffect(() => {
+		const store = usePlayerChaptersSheetStore.getState()
+		store.markMounted()
+
+		return store.unmount
+	}, [])
+
+	useEffect(() => {
 		didScroll.current = false
 	}, [isOpen, data.trackId])
 
@@ -77,7 +84,7 @@ export function PlayerChaptersSheet() {
 				usePlayerChaptersSheetStore.getState().setOpen(false)
 			}}
 			onDidDismiss={() => {
-				usePlayerChaptersSheetStore.getState().setOpen(false)
+				usePlayerChaptersSheetStore.getState().unmount()
 			}}
 		>
 			<View style={{ flex: 1 }}>

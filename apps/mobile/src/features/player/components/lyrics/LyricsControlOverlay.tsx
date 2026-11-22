@@ -30,7 +30,7 @@ const OFFSET_ICON = ExpoIcon.select({
 	android: import('@expo/material-symbols/swap_vertical_circle.xml'),
 })
 
-export const LYRICS_CONTROLS_OVERLAY_HEIGHT = 220
+export const LYRICS_CONTROLS_OVERLAY_HEIGHT = 240
 
 interface LyricsControlOverlayProps {
 	offsetMenuVisible: boolean
@@ -83,8 +83,8 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 		return null
 	}
 
-	const paddingBottom = Math.max(insets.bottom - 14, 8)
-	const overlayHeight = 165 + paddingBottom
+	const paddingBottom = Math.max(insets.bottom + 14, 24)
+	const overlayHeight = 180 + paddingBottom
 
 	return (
 		<View
@@ -130,6 +130,7 @@ const styles = StyleSheet.create({
 		bottom: 0,
 		left: 0,
 		right: 0,
+		zIndex: 2,
 		justifyContent: 'flex-end',
 	},
 	playerControls: {

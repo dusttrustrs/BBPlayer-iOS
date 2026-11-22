@@ -39,7 +39,7 @@ import drizzleDb from '@/lib/db/db'
 import { applyAppOrientation } from '@/lib/player/orientation'
 import { playerSideEffects } from '@/lib/player/PlayerSideEffects'
 import { analyticsService } from '@/lib/services/analyticsService'
-import lyricService from '@/lib/services/lyricService'
+import { getLyricService } from '@/lib/services/getLyricService'
 import { registerUpdatePrefetch } from '@/lib/services/updateService'
 import {
 	reportUpdateActivity,
@@ -107,7 +107,7 @@ function runAppInit() {
 				logger.warning('清理旧日志失败', { error: e.message })
 			})
 
-		void lyricService.migrateFromOldFormat()
+		void getLyricService().migrateFromOldFormat()
 
 		initPlaybackContextStore()
 		usePlayerStore.getState().initialize()

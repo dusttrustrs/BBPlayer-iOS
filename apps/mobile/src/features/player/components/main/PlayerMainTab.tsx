@@ -2,8 +2,9 @@ import {
 	Orpheus,
 	RepeatMode,
 	type Track as OrpheusTrack,
+	useSpectrumVisualizerEnabled,
 } from '@bbplayer/orpheus'
-import { Show } from '@legendapp/state/react'
+import { Show, useValue } from '@legendapp/state/react'
 import { Image, type ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
 import {
@@ -21,12 +22,17 @@ import {
 	View,
 } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { Text, useTheme } from 'react-native-paper'
 import Animated, {
 	Easing,
 	Extrapolation,
+	FadeIn,
+	FadeOut,
 	interpolate,
 	useAnimatedStyle,
 	useSharedValue,
+	withDelay,
+	withSequence,
 	withSpring,
 	withTiming,
 } from 'react-native-reanimated'
@@ -35,6 +41,7 @@ import { scheduleOnRN } from 'react-native-worklets'
 
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
+import { SPECTRUM_CANVAS_PADDING } from '@/features/player/components/visuals/SpectrumVisualizer'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
@@ -45,6 +52,7 @@ import { usePlayerQueueStore } from '@/hooks/stores/usePlayerQueueStore'
 import { analyticsService } from '@/lib/services/analyticsService'
 import * as Haptics from '@/utils/haptics'
 import { resolveBilibiliImageUrl, resolveTrackCover } from '@/utils/imageUrl'
+import { storage } from '@/utils/mmkv'
 
 import { PlayerSlider } from './PlayerSlider'
 import { TrackInfo } from './PlayerTrackInfo'
@@ -54,6 +62,52 @@ interface PlayerMainTabProps {
 	jumpTo: (key: string) => void
 	imageRef: ImageRef | null
 	onPresent: () => void
+}
+
+const SUBTITLES_HINT_DELAY = 600
+const SUBTITLES_HINT_DURATION = 3500
+
+/**
+ * 首次进入播客模式时提示一次字幕页的位置：页面向左轻推两下再复位，并显示一行文字。
+ */
+function usePodcastSubtitlesHint(enabled: boolean) {
+	const translateX = useSharedValue(0)
+	const [visible, setVisible] = useState(false)
+
+	useEffect(() => {
+		if (!enabled || storage.getBoolean('podcast_subtitles_hint_shown')) return
+
+		const showTimer = setTimeout(() => {
+			storage.set('podcast_subtitles_hint_shown', true)
+			setVisible(true)
+
+			const easing = Easing.out(Easing.cubic)
+			translateX.set(
+				withSequence(
+					withTiming(-40, { duration: 260, easing }),
+					withTiming(0, { duration: 260, easing }),
+					withDelay(120, withTiming(-24, { duration: 220, easing })),
+					withTiming(0, { duration: 220, easing }),
+				),
+			)
+		}, SUBTITLES_HINT_DELAY)
+
+		const hideTimer = setTimeout(
+			() => setVisible(false),
+			SUBTITLES_HINT_DELAY + SUBTITLES_HINT_DURATION,
+		)
+
+		return () => {
+			clearTimeout(showTimer)
+			clearTimeout(hideTimer)
+		}
+	}, [enabled, translateX])
+
+	const animatedStyle = useAnimatedStyle(() => ({
+		transform: [{ translateX: translateX.get() }],
+	}))
+
+	return { visible, animatedStyle }
 }
 
 let lastPlayerSkipTimestamp = 0
@@ -72,10 +126,16 @@ const PlayerMainTab = memo(function PlayerMainTab({
 }: PlayerMainTabProps) {
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
+	const { colors } = useTheme()
 	const currentTrack = useCurrentTrack()
+	const mode = useValue(playbackContextStore$.context.mode)
+	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 	const activeTrackKey = currentTrack?.uniqueKey
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
+	const subtitlesHint = usePodcastSubtitlesHint(
+		mode === 'podcast' && !isLandscape && !!currentTrack,
+	)
 	const [isDraggingSlider, setIsDraggingSlider] = useState(false)
 
 	const estimatedViewportHeight = Math.max(1, height - insets.top - 56)
@@ -421,7 +481,17 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	// 横屏布局：左侧封面，右侧播放控制区域（评论区开启时卡片只占据右侧区域）
 	if (isLandscape) {
 		const padH = Math.max(insets.left, insets.right, 24)
-		const coverSize = Math.min(width * 0.42, height - 56 - 24)
+		const spectrumReserve =
+			enableSpectrumVisualizer && mode !== 'podcast'
+				? SPECTRUM_CANVAS_PADDING * 2
+				: 0
+		const coverSize = Math.max(
+			120,
+			Math.min(
+				width * 0.42 - spectrumReserve,
+				height - 56 - 24 - spectrumReserve,
+			),
+		)
 		return (
 			<Show if={playbackContextStore$.ready}>
 				<View style={[styles.landscapeRow, { paddingHorizontal: padH }]}>
@@ -489,8 +559,8 @@ const PlayerMainTab = memo(function PlayerMainTab({
 	// 竖屏布局：仿抖音垂直滑屏切歌 + 底部上滑开启卡片式评论区
 	return (
 		<Show if={playbackContextStore$.ready}>
-			<View
-				style={styles.viewportWrapper}
+			<Animated.View
+				style={[styles.viewportWrapper, subtitlesHint.animatedStyle]}
 				onLayout={handleViewportLayout}
 			>
 				<Animated.View style={[styles.container, swipeAnimatedStyle]}>
@@ -524,6 +594,25 @@ const PlayerMainTab = memo(function PlayerMainTab({
 								styles.controlsContainer,
 							]}
 						>
+							{subtitlesHint.visible && (
+								<Animated.View
+									entering={FadeIn}
+									exiting={FadeOut}
+									pointerEvents='none'
+									style={[
+										styles.subtitlesHint,
+										{ backgroundColor: colors.inverseSurface },
+									]}
+									testID='player-subtitles-hint'
+								>
+									<Text
+										variant='labelLarge'
+										style={{ color: colors.inverseOnSurface }}
+									>
+										左滑或点击封面查看字幕
+									</Text>
+								</Animated.View>
+							)}
 							<PlayerSlider onDragStateChange={setIsDraggingSlider} />
 							<PlayerControls
 								onOpenQueue={() => {
@@ -579,7 +668,7 @@ const PlayerMainTab = memo(function PlayerMainTab({
 						/>
 					</Animated.View>
 				)}
-			</View>
+			</Animated.View>
 		</Show>
 	)
 })
@@ -606,6 +695,15 @@ const styles = StyleSheet.create({
 	controlsContainer: {
 		paddingHorizontal: 24,
 	},
+	// 悬浮在控件区上方，出现和消失都不挤动布局。
+	subtitlesHint: {
+		position: 'absolute',
+		bottom: '100%',
+		alignSelf: 'center',
+		paddingHorizontal: 16,
+		paddingVertical: 8,
+		borderRadius: 999,
+	},
 	bottomPillArea: {
 		alignItems: 'center',
 		paddingTop: 8,
@@ -627,6 +725,8 @@ const styles = StyleSheet.create({
 		flex: 0.42,
 		alignItems: 'center',
 		justifyContent: 'center',
+		overflow: 'visible',
+		zIndex: 2,
 	},
 	landscapeRight: {
 		flex: 0.58,

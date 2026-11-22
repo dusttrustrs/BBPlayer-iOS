@@ -14,6 +14,7 @@ const BAR_COUNT = 60
 const MAX_BAR_HEIGHT = 36
 const SMOOTHING_FACTOR = 0.3
 const GAP = 4
+export const SPECTRUM_CANVAS_PADDING = MAX_BAR_HEIGHT + GAP + 4
 
 export const SpectrumVisualizer = ({
 	isPlaying,
@@ -40,7 +41,7 @@ export const SpectrumVisualizer = ({
 	}, [])
 
 	const geometry = useDerivedValue(() => {
-		const center = size / 2 + MAX_BAR_HEIGHT
+		const center = size / 2 + SPECTRUM_CANVAS_PADDING
 		const radius = size / 2 + GAP
 		const result = new Float32Array(BAR_COUNT * 4)
 
@@ -182,7 +183,7 @@ export const SpectrumVisualizer = ({
 		}
 	}, [frequencyData, isPlaying, isAppActive])
 
-	const containerSize = size + MAX_BAR_HEIGHT * 2
+	const containerSize = size + SPECTRUM_CANVAS_PADDING * 2
 
 	return (
 		<View

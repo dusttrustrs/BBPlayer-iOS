@@ -84,7 +84,16 @@ const resolveComponent = (
 			})
 			return createSkinFetchFailed(error.message, error)
 		})
-		.andThen((data: BilibiliGarbBenefitResponse) => {
+		.andThen((data: BilibiliGarbBenefitResponse | null) => {
+			if (!data) {
+				log.warning('[adapter] theme component empty benefit', {
+					componentId,
+					componentName,
+				})
+
+				return okAsync({ data: null, partId: null })
+			}
+
 			const id = Number(componentId) || 0
 
 			switch (data.part_id) {

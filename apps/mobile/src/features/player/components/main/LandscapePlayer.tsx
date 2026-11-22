@@ -2,6 +2,7 @@ import {
 	Orpheus,
 	RepeatMode,
 	type Track as OrpheusTrack,
+	useSpectrumVisualizerEnabled,
 } from '@bbplayer/orpheus'
 import { Computed, Show } from '@legendapp/state/react'
 import { Image, type ImageRef } from 'expo-image'
@@ -43,6 +44,8 @@ import { scheduleOnRN } from 'react-native-worklets'
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { PlayerControls } from '@/features/player/components/controls/PlayerControls'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
+import { PodcastSubtitles } from '@/features/player/components/lyrics/PodcastSubtitles'
+import { SPECTRUM_CANVAS_PADDING } from '@/features/player/components/visuals/SpectrumVisualizer'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { usePlaybackOptions } from '@/hooks/player/usePlaybackOptions'
 import {
@@ -174,6 +177,7 @@ export function LandscapePlayer({
 		(state) => state.settings.enableSwipeToOpenComments ?? true,
 	)
 	const isCommentsOpen = usePlayerCommentsStore((state) => state.isOpen)
+	const enableSpectrumVisualizer = useSpectrumVisualizerEnabled()
 
 	const bvid =
 		currentTrack?.source === 'bilibili'
@@ -468,10 +472,20 @@ export function LandscapePlayer({
 	const availHeight = height - insets.top - 52 - Math.max(insets.bottom, 12)
 	const availWidth = (width - padL - padR - (isTabletScreen ? 44 : 28)) * 0.44
 	const maxCoverCap = isTabletScreen ? 430 : 340
-	const coverSize = Math.floor(
-		Math.min(availWidth, availHeight * 0.92, maxCoverCap),
-	)
 	const isPodcast = playbackContextStore$.context.mode.peek() === 'podcast'
+	const spectrumReserve =
+		enableSpectrumVisualizer && !isPodcast ? SPECTRUM_CANVAS_PADDING * 2 : 0
+	const coverSize = Math.max(
+		120,
+		Math.floor(
+			Math.min(
+				availWidth - spectrumReserve,
+				availHeight - spectrumReserve,
+				availHeight * 0.92,
+				maxCoverCap,
+			),
+		),
+	)
 
 	return (
 		<Show if={playbackContextStore$.ready}>
@@ -489,7 +503,10 @@ export function LandscapePlayer({
 				{/* 左侧封面居中常驻展示，支持上下滑切歌 */}
 				<GestureDetector gesture={swipeTrackGesture}>
 					<View
-						style={styles.left}
+						style={[
+							styles.left,
+							{ overflow: isSwitchingTrack ? 'hidden' : 'visible' },
+						]}
 						onLayout={handleLeftLayout}
 					>
 						<Animated.View style={[styles.leftInner, coverStyle]}>
@@ -562,11 +579,7 @@ export function LandscapePlayer({
 								ref={pagerRef}
 								style={styles.flex}
 								initialPage={index}
-								scrollEnabled={
-									playbackContextStore$.context.mode.get() !== 'podcast' &&
-									!isScrubbing &&
-									!playerSliderDragging$.get()
-								}
+								scrollEnabled={!isScrubbing && !playerSliderDragging$.get()}
 								onPageScroll={onPageScroll}
 								onPageSelected={(e) => setIndex(e.nativeEvent.position)}
 							>
@@ -620,19 +633,22 @@ export function LandscapePlayer({
 											</GestureDetector>
 										</View>
 									</View>,
-									...(playbackContextStore$.context.mode.get() === 'podcast'
-										? []
-										: [
-												<View
-													key='lyrics'
-													style={styles.flex}
-												>
-													<Lyrics
-														currentIndex={index}
-														onPressBackground={() => jumpTo('main')}
-													/>
-												</View>,
-											]),
+									<View
+										key='lyrics'
+										style={styles.flex}
+									>
+										{playbackContextStore$.context.mode.get() === 'podcast' ? (
+											<PodcastSubtitles
+												active={index === 1}
+												embedded
+											/>
+										) : (
+											<Lyrics
+												currentIndex={index}
+												onPressBackground={() => jumpTo('main')}
+											/>
+										)}
+									</View>,
 								]}
 							</AnimatedPagerView>
 						</Computed>
@@ -655,14 +671,16 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 		alignSelf: 'stretch',
-		overflow: 'hidden',
+		overflow: 'visible',
 		position: 'relative',
+		zIndex: 2,
 	},
 	leftInner: {
 		flex: 1,
 		width: '100%',
 		alignItems: 'center',
 		justifyContent: 'center',
+		overflow: 'visible',
 	},
 	coverPreviewOverlay: {
 		position: 'absolute',

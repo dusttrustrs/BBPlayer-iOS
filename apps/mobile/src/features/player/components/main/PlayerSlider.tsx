@@ -16,7 +16,6 @@ import {
 } from 'react-native-reanimated'
 import { scheduleOnRN } from 'react-native-worklets'
 
-import IconButton from '@/components/common/IconButton'
 import { usePlayerChapters } from '@/features/player/hooks/usePlayerChapters'
 import {
 	chapterIndexAt,
@@ -106,11 +105,13 @@ function TextWithAnimation({
 interface PlayerSliderProps {
 	onInteraction?: () => void
 	onDragStateChange?: (dragging: boolean) => void
+	showChapterTitle?: boolean
 }
 
 export function PlayerSlider({
 	onInteraction,
 	onDragStateChange: externalDragStateChange,
+	showChapterTitle = true,
 }: PlayerSliderProps = {}) {
 	const navigation = useNavigation()
 	const trackId = useCurrentTrackId()
@@ -371,7 +372,7 @@ export function PlayerSlider({
 
 	return (
 		<View style={styles.root}>
-			{podcast && (
+			{podcast && showChapterTitle && (
 				<AnimateableText
 					numberOfLines={1}
 					animatedProps={chapterPreviewProps}
@@ -383,21 +384,7 @@ export function PlayerSlider({
 					}}
 				/>
 			)}
-			<View
-				testID='player-slider'
-				style={podcast ? styles.podcastSliderRow : undefined}
-			>
-				{podcast && (
-					<IconButton
-						icon='rewind-15'
-						accessibilityLabel='后退 15 秒'
-						disabled={!canSeek}
-						style={styles.seekButton}
-						onPress={() => {
-							void handleSeek(-15, true)
-						}}
-					/>
-				)}
+			<View testID='player-slider'>
 				<WavySlider
 					style={podcast ? styles.podcastSlider : styles.slider}
 					enabled={canSeek}
@@ -425,20 +412,10 @@ export function PlayerSlider({
 					onValueChangeFinished={handleValueChangeFinished}
 					onDragStateChange={handleDragStateChange}
 				/>
-
-				{podcast && (
-					<IconButton
-						icon='fast-forward-15'
-						accessibilityLabel='前进 15 秒'
-						disabled={!canSeek}
-						style={styles.seekButton}
-						onPress={() => {
-							void handleSeek(15, true)
-						}}
-					/>
-				)}
 			</View>
-			<View style={styles.timeContainer}>
+			<View
+				style={[styles.timeContainer, podcast && styles.podcastTimeContainer]}
+			>
 				<TextWithAnimation
 					sharedPosition={displayPosition}
 					sharedDuration={duration}
@@ -449,9 +426,8 @@ export function PlayerSlider({
 }
 
 const styles = StyleSheet.create({
-	podcastSliderRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-	podcastSlider: { flex: 1, height: 25 },
-	seekButton: { width: 48, height: 48, margin: 0 },
+	podcastSlider: { width: '100%', height: 25 },
+	podcastTimeContainer: { width: '100%' },
 	root: {
 		width: '100%',
 		justifyContent: 'center',

@@ -94,7 +94,12 @@ export const PlaylistHeader = memo(function PlaylistHeader({
 			</View>
 
 			{/* 操作按钮 */}
-			<View style={styles.actionsContainer}>
+			<View
+				style={[
+					styles.actionsContainer,
+					{ marginBottom: description ? 0 : 16 },
+				]}
+			>
 				{linkedPlaylistId ? (
 					<Button
 						mode='contained'

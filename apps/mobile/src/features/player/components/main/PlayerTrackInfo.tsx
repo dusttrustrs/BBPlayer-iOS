@@ -28,7 +28,10 @@ import Animated, {
 
 import IconButton from '@/components/common/IconButton'
 import SkinThumbUpBurst from '@/features/player/components/visuals/SkinThumbUpBurst'
-import { SpectrumVisualizer } from '@/features/player/components/visuals/SpectrumVisualizer'
+import {
+	SPECTRUM_CANVAS_PADDING,
+	SpectrumVisualizer,
+} from '@/features/player/components/visuals/SpectrumVisualizer'
 import { useThumbUpVideo } from '@/hooks/mutations/bilibili/video'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
 import { useGetVideoIsThumbUp } from '@/hooks/queries/bilibili/video'
@@ -96,7 +99,7 @@ export function TrackInfo({
 	}, [currentTrack?.uniqueKey, rotation])
 
 	useEffect(() => {
-		const shouldAnimate = Boolean(rotatePlayerCover && isPlaying)
+		const shouldAnimate = rotatePlayerCover && isPlaying
 		frameCallback.setActive(shouldAnimate)
 		if (!rotatePlayerCover) {
 			rotation.set(0)
@@ -168,30 +171,39 @@ export function TrackInfo({
 						const baseSize = podcast ? coverSizeRect : coverSizeCircle
 						const coverSize = coverMaxSize ? coverMaxSize : baseSize
 						const coverBorderRadius = podcast
-							? coverSizeRect * SQUIRCLE_RADIUS_RATIO
+							? coverSize * SQUIRCLE_RADIUS_RATIO
 							: coverSize / 2
+						const showSpectrum = !podcast && enableSpectrumVisualizer
+						const spectrumExtra = showSpectrum ? SPECTRUM_CANVAS_PADDING * 2 : 8
 						return (
 							<Pressable
 								style={[
 									styles.coverContainer,
-									{ height: coverSizeRect + 48 },
+									{ height: coverSizeRect + 48, overflow: 'visible' },
 									coverMaxSize
 										? {
-												height: coverMaxSize + 8,
+												width: coverMaxSize + spectrumExtra,
+												height: coverMaxSize + spectrumExtra,
 												paddingHorizontal: 0,
 												justifyContent: 'center',
 												alignItems: 'center',
+												overflow: 'visible',
 											}
 										: null,
 								]}
-								onPress={podcast ? undefined : onPressCover}
-								disabled={podcast}
+								onPress={onPressCover}
 							>
-								{!podcast && enableSpectrumVisualizer && (
+								{showSpectrum && (
 									<View
+										pointerEvents='none'
 										style={[
 											StyleSheet.absoluteFill,
-											{ alignItems: 'center', justifyContent: 'center' },
+											{
+												alignItems: 'center',
+												justifyContent: 'center',
+												overflow: 'visible',
+												zIndex: 2,
+											},
 										]}
 									>
 										<SpectrumVisualizer
@@ -203,14 +215,15 @@ export function TrackInfo({
 								)}
 								<Animated.View
 									style={[
-										{ width: coverSize, height: coverSize },
+										{ width: coverSize, height: coverSize, zIndex: 1 },
 										coverAnimatedStyle,
 									]}
 								>
 									<TouchableOpacity
 										activeOpacity={0.8}
-										onPress={podcast ? undefined : onPressCover}
-										disabled={podcast}
+										onPress={onPressCover}
+										accessibilityRole='button'
+										accessibilityLabel={podcast ? '查看字幕' : '查看歌词'}
 										style={{ width: coverSize, height: coverSize }}
 										testID='player-cover'
 									>

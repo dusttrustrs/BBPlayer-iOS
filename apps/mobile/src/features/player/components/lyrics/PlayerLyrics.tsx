@@ -47,10 +47,13 @@ const Lyrics = memo(function Lyrics({
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
-	const portraitBottomMaskHeight = Math.max(
-		insets.bottom + 196,
+	const portraitBottomClearance = Math.max(
+		insets.bottom + 216,
 		LYRICS_CONTROLS_OVERLAY_HEIGHT,
 	)
+	const portraitBottomFadeHeight = 48
+	const portraitBottomScrollPadding =
+		portraitBottomClearance + portraitBottomFadeHeight + 80
 	const colors = useTheme().colors
 	const scrollViewRef = useRef<Animated.ScrollView>(null)
 	const itemLayoutsRef = useRef<{ [index: number]: number }>({})
@@ -263,8 +266,8 @@ const Lyrics = memo(function Lyrics({
 						{
 							paddingTop: windowHeight * 0.05,
 							paddingBottom: Math.max(
-								windowHeight * 0.52,
-								portraitBottomMaskHeight + 64,
+								windowHeight * 0.56,
+								portraitBottomScrollPadding,
 							),
 						},
 					]}
@@ -305,8 +308,8 @@ const Lyrics = memo(function Lyrics({
 										height: isLandscape
 											? 80
 											: Math.max(
-													windowHeight * 0.52,
-													portraitBottomMaskHeight + 64,
+													windowHeight * 0.56,
+													portraitBottomScrollPadding,
 												),
 									}}
 									onPress={onPressBackground}
@@ -381,21 +384,31 @@ const Lyrics = memo(function Lyrics({
 								}}
 							/>
 
-							<LinearGradient
-								style={[
-									styles.gradient,
-									!isLandscape && {
-										height: portraitBottomMaskHeight,
-									},
-								]}
-								start={{ x: 0, y: 0 }}
-								end={{ x: 0, y: 1 }}
-								colors={[colors.background, 'transparent']}
-								locations={[
-									0,
-									!isLandscape ? 64 / portraitBottomMaskHeight : 1,
-								]}
-							/>
+							{isLandscape ? (
+								<LinearGradient
+									style={styles.gradient}
+									start={{ x: 0, y: 0 }}
+									end={{ x: 0, y: 1 }}
+									colors={[colors.background, 'transparent']}
+									locations={[0, 1]}
+								/>
+							) : (
+								<>
+									<LinearGradient
+										style={{ height: portraitBottomFadeHeight }}
+										start={{ x: 0, y: 0 }}
+										end={{ x: 0, y: 1 }}
+										colors={[colors.background, 'transparent']}
+										locations={[0, 1]}
+									/>
+									<View
+										style={{
+											height: portraitBottomClearance,
+											backgroundColor: 'transparent',
+										}}
+									/>
+								</>
+							)}
 						</View>
 					}
 				>

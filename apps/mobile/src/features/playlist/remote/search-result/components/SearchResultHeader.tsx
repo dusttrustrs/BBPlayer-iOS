@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import {
+	memo,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useRef,
+	useState,
+} from 'react'
 import {
 	BackHandler,
 	type GestureResponderEvent,
@@ -22,6 +30,7 @@ import Animated, {
 	withTiming,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { scheduleOnRN } from 'react-native-worklets'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
 import * as Haptics from '@/utils/haptics'
@@ -29,10 +38,21 @@ import * as Haptics from '@/utils/haptics'
 const COLLAPSED_PILL_WIDTH = 40
 const EXPAND_EASING = Easing.bezier(0.16, 1, 0.3, 1)
 const KNOCK_OUT_EASING = Easing.bezier(0.22, 0.04, 0.12, 1)
-const COLLAPSE_EASING = Easing.bezier(0.4, 0, 0.2, 1)
+const COLLAPSE_EASING = Easing.bezier(0.32, 0, 0.2, 1)
 const TITLE_RETURN_EASING = Easing.bezier(0.22, 1, 0.36, 1)
 
+export interface SearchResultHeaderHandle {
+	collapse: (immediate?: boolean) => void
+}
+
+export interface SearchInputOverlayState {
+	isOpen: boolean
+	query: string
+	showSuggestions: boolean
+}
+
 interface SearchResultHeaderProps {
+	headerRef?: RefObject<SearchResultHeaderHandle | null>
 	query: string
 	selectMode: boolean
 	selectedCount: number
@@ -40,12 +60,14 @@ interface SearchResultHeaderProps {
 	onBack: () => void
 	onDoubleTap: (e: GestureResponderEvent) => void | Promise<void>
 	onSubmitSearch: (nextQuery: string) => void | Promise<void>
+	onSearchStateChange?: (state: SearchInputOverlayState) => void
 	onBatchAdd?: () => void
 	placeholder?: string
 	isSubmitting?: boolean
 }
 
 export const SearchResultHeader = memo(function SearchResultHeader({
+	headerRef,
 	query,
 	selectMode,
 	selectedCount,
@@ -53,6 +75,7 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 	onBack,
 	onDoubleTap,
 	onSubmitSearch,
+	onSearchStateChange,
 	onBatchAdd,
 	placeholder = '关键词 / b23.tv / 视频链接 / av / BV',
 	isSubmitting = false,
@@ -61,9 +84,12 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 	const insets = useSafeAreaInsets()
 	const inputRef = useRef<TextInput>(null)
 	const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const isOpenRef = useRef(false)
+	const isCollapsingRef = useRef(false)
 
 	const [isSearchOpen, setIsSearchOpen] = useState(false)
 	const [inputQuery, setInputQuery] = useState(query)
+	const [hasEdited, setHasEdited] = useState(false)
 	const [stageWidth, setStageWidth] = useState(0)
 
 	const stageWidthSV = useSharedValue(0)
@@ -77,69 +103,131 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 		}
 	}, [])
 
+	const finishCollapse = useCallback(() => {
+		isCollapsingRef.current = false
+		isOpenRef.current = false
+		setIsSearchOpen(false)
+		setHasEdited(false)
+	}, [])
+
 	const collapseSearch = useCallback(
 		(immediate = false) => {
+			if (!isOpenRef.current && !isCollapsingRef.current) return
 			clearFocusTimer()
 			inputRef.current?.blur()
 			Keyboard.dismiss()
-			setIsSearchOpen(false)
+			onSearchStateChange?.({
+				isOpen: false,
+				query: '',
+				showSuggestions: false,
+			})
 			cancelAnimation(expandProgress)
 			cancelAnimation(titleKnockProgress)
 			if (immediate) {
 				expandProgress.set(0)
 				titleKnockProgress.set(0)
+				finishCollapse()
 			} else {
+				isCollapsingRef.current = true
 				expandProgress.set(
-					withTiming(0, { duration: 310, easing: COLLAPSE_EASING }),
+					withTiming(
+						0,
+						{ duration: 280, easing: COLLAPSE_EASING },
+						(finished) => {
+							'worklet'
+							if (finished) {
+								scheduleOnRN(finishCollapse)
+							}
+						},
+					),
 				)
 				titleKnockProgress.set(
 					withDelay(
-						65,
-						withTiming(0, { duration: 310, easing: TITLE_RETURN_EASING }),
+						140,
+						withTiming(0, { duration: 240, easing: TITLE_RETURN_EASING }),
 					),
 				)
 			}
 		},
-		[clearFocusTimer, expandProgress, titleKnockProgress],
+		[
+			clearFocusTimer,
+			expandProgress,
+			finishCollapse,
+			onSearchStateChange,
+			titleKnockProgress,
+		],
+	)
+
+	useImperativeHandle(
+		headerRef,
+		() => ({
+			collapse: collapseSearch,
+		}),
+		[collapseSearch],
 	)
 
 	const openSearch = useCallback(() => {
-		if (selectMode || isSearchOpen) return
+		if (selectMode || (isOpenRef.current && !isCollapsingRef.current)) return
 		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
+		isCollapsingRef.current = false
+		isOpenRef.current = true
 		setInputQuery(query)
+		setHasEdited(false)
 		setIsSearchOpen(true)
+		onSearchStateChange?.({
+			isOpen: true,
+			query,
+			showSuggestions: false,
+		})
 		cancelAnimation(expandProgress)
 		cancelAnimation(titleKnockProgress)
-		expandProgress.set(withTiming(1, { duration: 440, easing: EXPAND_EASING }))
+		expandProgress.set(withTiming(1, { duration: 400, easing: EXPAND_EASING }))
 		titleKnockProgress.set(
-			withDelay(55, withTiming(1, { duration: 360, easing: KNOCK_OUT_EASING })),
+			withDelay(45, withTiming(1, { duration: 340, easing: KNOCK_OUT_EASING })),
 		)
 		clearFocusTimer()
 		focusTimerRef.current = setTimeout(() => {
-			inputRef.current?.focus()
-		}, 140)
+			if (isOpenRef.current && !isCollapsingRef.current) {
+				inputRef.current?.focus()
+			}
+		}, 160)
 	}, [
 		clearFocusTimer,
 		expandProgress,
-		isSearchOpen,
+		onSearchStateChange,
 		query,
 		selectMode,
 		titleKnockProgress,
 	])
 
+	const handleChangeText = useCallback(
+		(nextText: string) => {
+			setInputQuery(nextText)
+			setHasEdited(true)
+			if (isOpenRef.current && !isCollapsingRef.current) {
+				onSearchStateChange?.({
+					isOpen: true,
+					query: nextText,
+					showSuggestions: nextText.trim().length > 0,
+				})
+			}
+		},
+		[onSearchStateChange],
+	)
+
 	useEffect(() => {
 		setInputQuery(query)
-		if (isSearchOpen) {
+		if (isOpenRef.current) {
 			collapseSearch(false)
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- only react when route query changes
 	}, [query])
 
 	useEffect(() => {
-		if (selectMode && isSearchOpen) {
+		if (selectMode && isOpenRef.current) {
 			collapseSearch(true)
 		}
-	}, [selectMode, isSearchOpen, collapseSearch])
+	}, [selectMode, collapseSearch])
 
 	useEffect(() => {
 		if (!isSearchOpen) return
@@ -172,12 +260,12 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 			onExitSelectMode()
 			return
 		}
-		if (isSearchOpen) {
+		if (isOpenRef.current) {
 			collapseSearch(false)
 			return
 		}
 		onBack()
-	}, [collapseSearch, isSearchOpen, onBack, onExitSelectMode, selectMode])
+	}, [collapseSearch, onBack, onExitSelectMode, selectMode])
 
 	const handleSubmit = useCallback(() => {
 		const trimmed = inputQuery.trim()
@@ -196,11 +284,17 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 	const handleClearOrClose = useCallback(() => {
 		if (inputQuery.length > 0) {
 			setInputQuery('')
+			setHasEdited(true)
+			onSearchStateChange?.({
+				isOpen: true,
+				query: '',
+				showSuggestions: false,
+			})
 			inputRef.current?.focus()
 		} else {
 			collapseSearch(false)
 		}
-	}, [collapseSearch, inputQuery.length])
+	}, [collapseSearch, inputQuery.length, onSearchStateChange])
 
 	// 标题被向左展开的搜索框顶飞到左边并随后渐隐消失
 	const titleAnimatedStyle = useAnimatedStyle(() => {
@@ -262,7 +356,7 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 	const inputAnimatedStyle = useAnimatedStyle(() => {
 		const opacity = interpolate(
 			expandProgress.value,
-			[0, 0.3, 0.82, 1],
+			[0, 0.55, 0.9, 1],
 			[0, 0, 1, 1],
 			Extrapolation.CLAMP,
 		)
@@ -273,6 +367,7 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 
 	const padLeft = insets.left + 4
 	const padRight = insets.right + 4
+	const fixedInputWidth = Math.max(0, stageWidth - COLLAPSED_PILL_WIDTH)
 
 	return (
 		<View
@@ -366,17 +461,35 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 							</Pressable>
 							<Animated.View
 								pointerEvents={isSearchOpen ? 'auto' : 'none'}
-								style={[styles.inputContainer, inputAnimatedStyle]}
+								style={[
+									styles.inputContainer,
+									fixedInputWidth > 0 ? { width: fixedInputWidth } : null,
+									inputAnimatedStyle,
+								]}
 							>
 								<TextInput
 									ref={inputRef}
 									value={inputQuery}
-									onChangeText={setInputQuery}
+									onChangeText={handleChangeText}
 									onSubmitEditing={handleSubmit}
+									onFocus={() => {
+										if (
+											isOpenRef.current &&
+											!isCollapsingRef.current &&
+											hasEdited &&
+											inputQuery.trim().length > 0
+										) {
+											onSearchStateChange?.({
+												isOpen: true,
+												query: inputQuery,
+												showSuggestions: true,
+											})
+										}
+									}}
 									placeholder={placeholder}
 									placeholderTextColor={colors.onSurfaceVariant}
 									returnKeyType='search'
-									editable={isSearchOpen && !isSubmitting}
+									editable={!isSubmitting}
 									autoCorrect={false}
 									autoCapitalize='none'
 									selectionColor={colors.primary}
@@ -410,7 +523,7 @@ export const SearchResultHeader = memo(function SearchResultHeader({
 const styles = StyleSheet.create({
 	root: {
 		elevation: 2,
-		zIndex: 1,
+		zIndex: 10,
 		shadowColor: '#000',
 		shadowOffset: { width: 0, height: 1 },
 		shadowOpacity: 0.15,
@@ -488,10 +601,10 @@ const styles = StyleSheet.create({
 		flexShrink: 0,
 	},
 	inputContainer: {
-		flex: 1,
 		flexDirection: 'row',
 		alignItems: 'center',
 		paddingRight: 4,
+		flexShrink: 0,
 	},
 	textInput: {
 		flex: 1,
