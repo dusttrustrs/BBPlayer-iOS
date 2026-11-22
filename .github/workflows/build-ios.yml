@@ -2437,7 +2437,31 @@ jobs:
           }
           console.log(`✅ 已修补 ${colorPatched} 个 Convertibles+Color.swift (移除 iOS 16+ RegexBuilder 依赖)`);
 
-          // 5. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
+          // 5. 修补 ExpoModulesCore SceneGeometry.swift 中的 iOS 16+ effectiveGeometry API
+          const sceneGeoFiles = walkFiles("node_modules", (name, full) =>
+            name === "SceneGeometry.swift" && full.includes("expo-modules-core")
+          );
+          let sceneGeoPatched = 0;
+          for (const f of sceneGeoFiles) {
+            const code = fs.readFileSync(f, "utf8");
+            if (code.includes("if #available(iOS 16.0, *)")) continue;
+            const next = code.replace(
+              "return windowScene(for: view)?.effectiveGeometry.interfaceOrientation ?? .unknown",
+              [
+                "if #available(iOS 16.0, *) {",
+                "      return windowScene(for: view)?.effectiveGeometry.interfaceOrientation ?? .unknown",
+                "    }",
+                "    return windowScene(for: view)?.interfaceOrientation ?? .unknown",
+              ].join("\n")
+            );
+            if (next !== code) {
+              fs.writeFileSync(f, next, "utf8");
+              sceneGeoPatched++;
+            }
+          }
+          console.log(`✅ 已修补 ${sceneGeoPatched} 个 SceneGeometry.swift (为 effectiveGeometry 添加 iOS 15.0 兼容回退)`);
+
+          // 6. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
           const pkgPath = "apps/mobile/package.json";
           const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
           pkg.expo = pkg.expo || {};
