@@ -2461,7 +2461,41 @@ jobs:
           }
           console.log(`✅ 已修补 ${sceneGeoPatched} 个 SceneGeometry.swift (为 effectiveGeometry 添加 iOS 15.0 兼容回退)`);
 
-          // 6. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
+          // 6. 修补 ExpoModulesJSI Package.swift 与 build-xcframework.sh：将 SPM 平台与嵌套 xcodebuild 基线降至 iOS 15.0，
+          //    避免 ExpoModulesJSI.framework 编译为 minos=16.4 并强链接 iOS 16+ 专属的 libswift_StringProcessing.dylib
+          const spmFiles = walkFiles("node_modules", (name, full) =>
+            name === "Package.swift" && full.includes("expo-modules-jsi")
+          );
+          let spmPatched = 0;
+          for (const f of spmFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            const next = orig.replace(/\.iOS\(\s*["'](?:15\.[1-9]\d*|1[6-9]\.\d+|2\d\.\d+)["']\s*\)/g, '.iOS("15.0")')
+              .replace(/\.iOS\(\s*\.v(?:1[6-9]|2\d)\s*\)/g, '.iOS(.v15)');
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              spmPatched++;
+            }
+          }
+          const jsiBuildScripts = walkFiles("node_modules", (name, full) =>
+            name === "build-xcframework.sh" && full.includes("expo-modules-jsi")
+          );
+          let jsiScriptPatched = 0;
+          for (const f of jsiBuildScripts) {
+            const orig = fs.readFileSync(f, "utf8");
+            if (!orig.includes("IPHONEOS_DEPLOYMENT_TARGET=15.0")) {
+              const next = orig.replace(
+                "CLANG_COVERAGE_MAPPING=NO",
+                "CLANG_COVERAGE_MAPPING=NO \\\n    IPHONEOS_DEPLOYMENT_TARGET=15.0"
+              );
+              if (next !== orig) {
+                fs.writeFileSync(f, next, "utf8");
+                jsiScriptPatched++;
+              }
+            }
+          }
+          console.log(`✅ 已修补 ${spmPatched} 个 ExpoModulesJSI Package.swift 与 ${jsiScriptPatched} 个 build-xcframework.sh -> iOS 15.0`);
+
+          // 7. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
           const pkgPath = "apps/mobile/package.json";
           const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
           pkg.expo = pkg.expo || {};
