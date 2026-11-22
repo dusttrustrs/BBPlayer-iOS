@@ -2461,10 +2461,16 @@ jobs:
           }
           console.log(`✅ 已修补 ${sceneGeoPatched} 个 SceneGeometry.swift (为 effectiveGeometry 添加 iOS 15.0 兼容回退)`);
 
-          // 6. 修补 ExpoModulesJSI：
+          // 6. 修补 ExpoModulesJSI 以原生 -target arm64-apple-ios15.0 编译：
           //    (a) 替换 JavaScriptRuntime.swift 中的 Swift 5.7+ Regex 字面量 (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/ + wholeMatch)，
           //        彻底消除对 iOS 16+ 专属 libswift_StringProcessing.dylib 的符号导入；
-          //    (b) 为 Package.swift 注入 -dead_strip_dylibs，防止编译器默认强链接未使用的 iOS 16+ dylib
+          //    (b) 替换 JavaScriptValue.swift / JavaScriptUnownedValue.swift 中的 `let type: any ~Copyable.Type`，
+          //        彻底消除 iOS 16+ 专属符号 _swift_getExtendedExistentialTypeMetadata (同时规避 Swift 6.2/6.3 #89402 崩溃)；
+          //    (c) 将 Package.swift 平台降至 .iOS("15.0") 并注入 -Xfrontend -disable-availability-checking
+          //        (绕过 SWIFT_IMMORTAL_REFERENCE 编译期 16.4 门禁，底层仅依赖 iOS 12.2+ 的 swift_getForeignTypeMetadata)，
+          //        同时注入 -dead_strip_dylibs；
+          //    (d) 在 build-xcframework.sh 中传入 IPHONEOS_DEPLOYMENT_TARGET=15.0，彻底消除 iOS 16+ _objc_retain_xN/_objc_release_xN
+          //        和 libswiftCoreFoundation 中的 CGFloat 强绑定
           const jsiRuntimeFiles = walkFiles("node_modules", (name, full) =>
             name === "JavaScriptRuntime.swift" && full.includes("expo-modules-jsi")
           );
@@ -2504,24 +2510,102 @@ jobs:
           }
           console.log(`✅ 已修补 ${jsiRuntimePatched} 个 ExpoModulesJSI JavaScriptRuntime.swift (移除 Swift Regex 字面量)`);
 
+          const jsiValueFiles = walkFiles("node_modules", (name, full) =>
+            (name === "JavaScriptValue.swift" || name === "JavaScriptUnownedValue.swift") &&
+            full.includes("expo-modules-jsi")
+          );
+          let jsiValuePatched = 0;
+          for (const f of jsiValueFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            let next = orig;
+            if (f.endsWith("JavaScriptValue.swift")) {
+              next = next.replace(
+                [
+                  "  public struct TypeError: Error, CustomStringConvertible {",
+                  "    let type: any ~Copyable.Type",
+                  "",
+                  "    public var description: String {",
+                  '      return "TypeError: Value cannot be represented as \\(type)"',
+                  "    }",
+                  "  }",
+                ].join("\n"),
+                [
+                  "  public struct TypeError: Error, CustomStringConvertible {",
+                  "    let typeName: String",
+                  "",
+                  "    init(typeName: String) {",
+                  "      self.typeName = typeName",
+                  "    }",
+                  "",
+                  "    public var description: String {",
+                  '      return "TypeError: Value cannot be represented as \\(typeName)"',
+                  "    }",
+                  "  }",
+                ].join("\n")
+              );
+              if (next.includes("any ~Copyable.Type")) {
+                throw new Error(`JavaScriptValue.swift TypeError 修补不完整: ${f}`);
+              }
+            }
+            next = next.replace(/TypeError\(type:\s*([A-Za-z0-9_]+)\.self\)/g, 'TypeError(typeName: "$1")');
+            if (/TypeError\(type:/.test(next)) {
+              throw new Error(`TypeError(type:) 仍有残留: ${f}`);
+            }
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              jsiValuePatched++;
+            }
+          }
+          console.log(`✅ 已修补 ${jsiValuePatched} 个 ExpoModulesJSI Value 文件 (消除 _swift_getExtendedExistentialTypeMetadata)`);
+
           const spmFiles = walkFiles("node_modules", (name, full) =>
             name === "Package.swift" && full.includes("expo-modules-jsi")
           );
           let spmPatched = 0;
           for (const f of spmFiles) {
             const orig = fs.readFileSync(f, "utf8");
-            if (!orig.includes("-dead_strip_dylibs")) {
-              const next = orig.replace(
+            let next = orig.replace(/\.iOS\("16\.4"\)/g, '.iOS("15.0")');
+            if (!next.includes("-disable-availability-checking")) {
+              next = next.replace(
+                '"-no-verify-emitted-module-interface",',
+                '"-no-verify-emitted-module-interface",\n          "-Xfrontend",\n          "-disable-availability-checking",'
+              );
+            }
+            if (!next.includes("-dead_strip_dylibs")) {
+              next = next.replace(
                 '"-Xlinker", "-undefined", "-Xlinker", "dynamic_lookup",',
                 '"-Xlinker", "-undefined", "-Xlinker", "dynamic_lookup",\n          "-Xlinker", "-dead_strip_dylibs",'
               );
-              if (next !== orig) {
-                fs.writeFileSync(f, next, "utf8");
-                spmPatched++;
-              }
+            }
+            if (!next.includes('.iOS("15.0")') || !next.includes("-disable-availability-checking")) {
+              throw new Error(`ExpoModulesJSI Package.swift 修补不完整: ${f}`);
+            }
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              spmPatched++;
             }
           }
-          console.log(`✅ 已为 ${spmPatched} 个 ExpoModulesJSI Package.swift 注入 -dead_strip_dylibs`);
+          console.log(`✅ 已修补 ${spmPatched} 个 ExpoModulesJSI Package.swift (.iOS("15.0") + -disable-availability-checking + -dead_strip_dylibs)`);
+
+          const xcfwBuildScripts = walkFiles("node_modules", (name, full) =>
+            name === "build-xcframework.sh" && full.includes("expo-modules-jsi")
+          );
+          let xcfwScriptPatched = 0;
+          for (const f of xcfwBuildScripts) {
+            const orig = fs.readFileSync(f, "utf8");
+            if (!orig.includes("IPHONEOS_DEPLOYMENT_TARGET=15.0")) {
+              const next = orig.replace(
+                "    CLANG_COVERAGE_MAPPING=NO \\",
+                "    CLANG_COVERAGE_MAPPING=NO \\\n    IPHONEOS_DEPLOYMENT_TARGET=15.0 \\"
+              );
+              if (next === orig) {
+                throw new Error(`ExpoModulesJSI build-xcframework.sh 修补不完整: ${f}`);
+              }
+              fs.writeFileSync(f, next, "utf8");
+              xcfwScriptPatched++;
+            }
+          }
+          console.log(`✅ 已修补 ${xcfwScriptPatched} 个 ExpoModulesJSI build-xcframework.sh (传入 IPHONEOS_DEPLOYMENT_TARGET=15.0)`);
 
           // 7. 确认 apps/mobile/package.json 已排除 iOS 16+ 原生模块并强制全量源码编译 (禁用 iOS 16.4 预编译 xcframework)
           const pkgPath = "apps/mobile/package.json";
@@ -3144,6 +3228,27 @@ jobs:
             if (changed) {
               fs.writeFileSync(binPath, buf);
             }
+            // 严格校验禁止任何 iOS 16+ 专属强导入符号 (会直接导致 iOS 15.0-15.8 启动时 dyld Symbol not found 闪退)
+            const badStrongSyms = [];
+            for (const rawLine of importsOut.split("\n")) {
+              const line = rawLine.trim();
+              if (!line || line.includes("[weak-import]")) continue;
+              if (
+                /_objc_(retain|release)_x\d+\b/.test(line) ||
+                line.includes("_swift_getExtendedExistentialTypeMetadata") ||
+                (line.includes("CoreGraphics7CGFloat") && line.includes("libswiftCoreFoundation")) ||
+                line.includes("libswift_StringProcessing") ||
+                line.includes("libswift_RegexParser")
+              ) {
+                badStrongSyms.push(line);
+              }
+            }
+            if (badStrongSyms.length > 0) {
+              console.error(`❌ 致命错误：${label} 存在 iOS 16+ 专属强导入符号，iOS 15.0 启动必闪退！`);
+              for (const s of badStrongSyms.slice(0, 20)) console.error("   🚨", s);
+              process.exit(1);
+            }
+            console.log(`✅ ${label}: 0 个 iOS 16+ 专属强导入符号 (_objc_retain_xN / ExtendedExistential / CoreFoundation.CGFloat / StringProcessing)`);
           NODE_WEAKEN_EOF
 
             echo "📋 $LABEL 强依赖动态库 (LC_LOAD_DYLIB) 校验："
