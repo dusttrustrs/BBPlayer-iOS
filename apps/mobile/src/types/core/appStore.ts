@@ -23,6 +23,7 @@ interface Settings {
 	enableIPadMode?: boolean
 	transparentBilibiliCard?: boolean
 	transparentBBPlayerCard?: boolean
+	enableSplitPlayerLayout?: boolean
 }
 
 interface BilibiliUserSummary {

@@ -101,6 +101,18 @@ object GeneralStorage {
         }
     }
 
+    fun getAppVolume(): Float {
+        return (kv?.decodeFloat("config_app_volume", 1.0f) ?: 1.0f).coerceIn(0f, 1f)
+    }
+
+    fun setAppVolume(volume: Float) {
+        try {
+            safeKv.encode("config_app_volume", volume.coerceIn(0f, 1f))
+        } catch (e: Exception) {
+            Log.e("MediaItemStorer", "Failed to set app volume", e)
+        }
+    }
+
     fun saveQueue(mediaItems: List<MediaItem>) {
         try {
             val jsonList = mediaItems.mapNotNull { item ->

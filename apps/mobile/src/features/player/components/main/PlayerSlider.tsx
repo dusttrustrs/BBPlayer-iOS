@@ -106,12 +106,14 @@ interface PlayerSliderProps {
 	onInteraction?: () => void
 	onDragStateChange?: (dragging: boolean) => void
 	showChapterTitle?: boolean
+	fullWidth?: boolean
 }
 
 export function PlayerSlider({
 	onInteraction,
 	onDragStateChange: externalDragStateChange,
 	showChapterTitle = true,
+	fullWidth = false,
 }: PlayerSliderProps = {}) {
 	const navigation = useNavigation()
 	const trackId = useCurrentTrackId()
@@ -386,7 +388,7 @@ export function PlayerSlider({
 			)}
 			<View testID='player-slider'>
 				<WavySlider
-					style={podcast ? styles.podcastSlider : styles.slider}
+					style={podcast || fullWidth ? styles.podcastSlider : styles.slider}
 					enabled={canSeek}
 					chapterMarkers={markers}
 					progress={progressFraction}
@@ -414,7 +416,10 @@ export function PlayerSlider({
 				/>
 			</View>
 			<View
-				style={[styles.timeContainer, podcast && styles.podcastTimeContainer]}
+				style={[
+					styles.timeContainer,
+					(podcast || fullWidth) && styles.podcastTimeContainer,
+				]}
 			>
 				<TextWithAnimation
 					sharedPosition={displayPosition}

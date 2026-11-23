@@ -37,6 +37,7 @@ import { LandscapePlayer } from '@/features/player/components/main/LandscapePlay
 import { PlayerChaptersSheet } from '@/features/player/components/main/PlayerChaptersSheet'
 import { PlayerHeader } from '@/features/player/components/main/PlayerHeader'
 import PlayerMainTab from '@/features/player/components/main/PlayerMainTab'
+import { SplitLyricsPlayer } from '@/features/player/components/main/SplitLyricsPlayer'
 import { PlayerFunctionalMenu } from '@/features/player/components/menu/PlayerFunctionalMenu'
 import { FluidBackground } from '@/features/player/components/visuals/FluidBackground'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
@@ -153,6 +154,9 @@ export default function PlayerPage() {
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
 	)
+	const enableSplitPlayerLayout = useAppStore(
+		(state) => state.settings.enableSplitPlayerLayout ?? false,
+	)
 	// 旧版 md3 / streamer 等存量值也回落到普通渐变。
 	const isFluidBackground = useAppStore(
 		(state) =>
@@ -179,7 +183,8 @@ export default function PlayerPage() {
 	const [isPreventingBack, setIsPreventingBack] = useState(true)
 
 	const [index, setIndex] = useState(0)
-	const suppressDesktopLyrics = isFocused && isForeground && index === 1
+	const suppressDesktopLyrics =
+		isFocused && isForeground && (enableSplitPlayerLayout || index === 1)
 
 	useEffect(() => {
 		if (Platform.OS !== 'android') return
@@ -235,7 +240,7 @@ export default function PlayerPage() {
 			usePlayerCommentsStore.getState().close()
 			return
 		}
-		if (index === 1) {
+		if (!enableSplitPlayerLayout && index === 1) {
 			pagerRef.current?.setPage(0)
 			return
 		}
@@ -253,6 +258,13 @@ export default function PlayerPage() {
 	}, [])
 
 	const scrollX = useSharedValue(0)
+
+	useEffect(() => {
+		if (enableSplitPlayerLayout) {
+			setIndex(0)
+			scrollX.set(0)
+		}
+	}, [enableSplitPlayerLayout, scrollX])
 
 	useObserveEffect(() => {
 		if (playbackContextStore$.context.mode.get() === 'podcast') {
@@ -365,7 +377,7 @@ export default function PlayerPage() {
 			void usePlayerQueueSheetStore.getState().close()
 			return
 		}
-		if (index === 1) {
+		if (!enableSplitPlayerLayout && index === 1) {
 			pagerRef.current?.setPage(0)
 			return
 		}
@@ -444,11 +456,16 @@ export default function PlayerPage() {
 							<PlayerHeader
 								onMorePress={() => setMenuVisible(true)}
 								onBack={handleDismiss}
-								index={index}
-								scrollX={scrollX}
+								index={enableSplitPlayerLayout ? 0 : index}
+								scrollX={enableSplitPlayerLayout ? undefined : scrollX}
 							/>
 						</Computed>
-						{width > height ? (
+						{enableSplitPlayerLayout ? (
+							<SplitLyricsPlayer
+								imageRef={coverRef}
+								isFocused={isFocused}
+							/>
+						) : width > height ? (
 							<LandscapePlayer
 								pagerRef={pagerRef}
 								index={index}
@@ -504,7 +521,7 @@ export default function PlayerPage() {
 					</View>
 
 					{chaptersSheetMounted && <PlayerChaptersSheet />}
-					{!isLandscape && (
+					{!isLandscape && !enableSplitPlayerLayout && (
 						<PlayerCommentsCard
 							bvid={bvid}
 							isLandscape={false}

@@ -165,3 +165,44 @@ export const useManualSearchLyrics = (uniqueKey?: string) => {
 		},
 	}
 }
+
+export const useTrackLyricCandidates = (track?: Track, enabled = false) => {
+	// oxlint-disable-next-line @tanstack/query/exhaustive-deps -- 同一 uniqueKey 对应同一曲目，缓存候选歌词列表
+	return useQuery({
+		queryKey: lyricsQueryKeys.trackCandidates(track?.uniqueKey),
+		enabled: Boolean(track && enabled),
+		staleTime: 5 * 60 * 1000,
+		queryFn: async ({ signal }): Promise<LyricSearchResult> => {
+			if (!track) return []
+			const keyword = await lyricService.resolveSearchKeyword(track)
+			const [neteaseRes, qqRes, kugouRes] = await Promise.allSettled([
+				neteaseApi.search({ keywords: keyword, limit: 8 }, signal),
+				qqMusicApi.search(keyword, 8, signal),
+				kugouApi.search(keyword, 8, signal),
+			])
+
+			const combined: LyricSearchResult = []
+			if (neteaseRes.status === 'fulfilled' && neteaseRes.value.isOk()) {
+				combined.push(...neteaseRes.value.value)
+			}
+			if (qqRes.status === 'fulfilled' && qqRes.value.isOk()) {
+				combined.push(...qqRes.value.value)
+			}
+			if (kugouRes.status === 'fulfilled' && kugouRes.value.isOk()) {
+				combined.push(...kugouRes.value.value)
+			}
+
+			// 按时长接近度排序，让最贴合当前曲目的各源歌词排在前面
+			const targetDuration = track.duration || 0
+			if (targetDuration > 0) {
+				combined.sort((a, b) => {
+					const diffA = Math.abs((a.duration || 0) - targetDuration)
+					const diffB = Math.abs((b.duration || 0) - targetDuration)
+					return diffA - diffB
+				})
+			}
+
+			return combined
+		},
+	})
+}

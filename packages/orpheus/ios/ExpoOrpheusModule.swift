@@ -575,6 +575,14 @@ public class ExpoOrpheusModule: Module {
         OrpheusPlayerManager.shared.setPlaybackSpeed(Float(speed))
     }
 
+    Function("setAppVolume") { (volume: Double) in
+        OrpheusPlayerManager.shared.setAppVolume(Float(volume))
+    }
+
+    Function("getAppVolume") { () -> Double in
+        return Double(OrpheusPlayerManager.shared.getAppVolume())
+    }
+
     Function("setBilibiliCookie") { (cookie: String) in
         BilibiliApi.shared.setCookie(cookie)
     }

@@ -2224,6 +2224,144 @@ jobs:
           rm -f patch_runtime.js
           node -e '
             const fs = require("fs");
+
+            // 1. 注入 GeneralStorage.swift 独立应用音量持久化（支持 UserDefaults + MMKV 双写，区分未设置与 0.0 静音）
+            const gsPath = "packages/orpheus/ios/GeneralStorage.swift";
+            let gs = fs.readFileSync(gsPath, "utf8");
+            if (!gs.includes("KEY_APP_VOLUME")) {
+              const keyAnchor = "private let KEY_BILIBILI_CDN = \"preferredBilibiliCdn\"";
+              if (!gs.includes(keyAnchor)) {
+                throw new Error("未在 GeneralStorage.swift 找到 KEY_BILIBILI_CDN 锚点");
+              }
+              gs = gs.replace(keyAnchor, keyAnchor + "\n    private let KEY_APP_VOLUME = \"appVolume\"");
+
+              const propAnchor = "    // MARK: - Playback State";
+              if (!gs.includes(propAnchor)) {
+                throw new Error("未在 GeneralStorage.swift 找到 Playback State 锚点");
+              }
+              const volProp = [
+                "    var appVolume: Float {",
+                "        get {",
+                "            let key = udKey(KEY_APP_VOLUME)",
+                "            if defaults.object(forKey: key) != nil {",
+                "                return max(0.0, min(1.0, defaults.float(forKey: key)))",
+                "            }",
+                "            if let mmkv = mmkv, mmkv.contains(key: KEY_APP_VOLUME) {",
+                "                let v = max(0.0, min(1.0, mmkv.float(forKey: KEY_APP_VOLUME, defaultValue: 1.0)))",
+                "                defaults.set(v, forKey: key)",
+                "                return v",
+                "            }",
+                "            return 1.0",
+                "        }",
+                "        set {",
+                "            let clamped = max(0.0, min(1.0, newValue))",
+                "            defaults.set(clamped, forKey: udKey(KEY_APP_VOLUME))",
+                "            mmkv?.set(clamped, forKey: KEY_APP_VOLUME)",
+                "        }",
+                "    }",
+                "",
+                propAnchor,
+              ].join("\n");
+              gs = gs.replace(propAnchor, volProp);
+              fs.writeFileSync(gsPath, gs, "utf8");
+              console.log("✅ 已为 GeneralStorage.swift 注入 appVolume 持久化");
+            }
+
+            // 2. 注入 OrpheusPlayerManager.swift 独立应用音量控制（AVPlayer.volume，完全独立于系统音量）
+            const pmPath = "packages/orpheus/ios/OrpheusPlayerManager.swift";
+            let pm = fs.readFileSync(pmPath, "utf8");
+            if (!pm.includes("func setAppVolume(")) {
+              const fieldAnchor = "    private var desiredPlaybackSpeed: Float = 1.0";
+              if (!pm.includes(fieldAnchor)) {
+                throw new Error("未在 OrpheusPlayerManager.swift 找到 desiredPlaybackSpeed 锚点");
+              }
+              pm = pm.replace(fieldAnchor, fieldAnchor + "\n    private var desiredAppVolume: Float = 1.0");
+
+              const playHelperAnchor = [
+                "    private func playCurrentItemAtDesiredSpeedOnMain() {",
+                "        stateLock.lock()",
+                "        let speed = desiredPlaybackSpeed",
+                "        stateLock.unlock()",
+              ].join("\n");
+              if (!pm.includes(playHelperAnchor)) {
+                throw new Error("未在 OrpheusPlayerManager.swift 找到 playCurrentItemAtDesiredSpeedOnMain 锚点");
+              }
+              pm = pm.replace(
+                playHelperAnchor,
+                [
+                  "    private func playCurrentItemAtDesiredSpeedOnMain() {",
+                  "        stateLock.lock()",
+                  "        let speed = desiredPlaybackSpeed",
+                  "        let vol = desiredAppVolume",
+                  "        stateLock.unlock()",
+                  "        player.volume = vol",
+                ].join("\n")
+              );
+
+              const getterAnchor = [
+                "    func getPlaybackSpeed() -> Float {",
+                "        stateLock.lock()",
+                "        defer { stateLock.unlock() }",
+                "        return desiredPlaybackSpeed",
+                "    }",
+              ].join("\n");
+              if (!pm.includes(getterAnchor)) {
+                throw new Error("未在 OrpheusPlayerManager.swift 找到 getPlaybackSpeed 锚点");
+              }
+              pm = pm.replace(
+                getterAnchor,
+                getterAnchor + "\n\n" + [
+                  "    func setAppVolume(_ volume: Float) {",
+                  "        let clamped = max(0.0, min(1.0, volume))",
+                  "        stateLock.lock()",
+                  "        desiredAppVolume = clamped",
+                  "        stateLock.unlock()",
+                  "        GeneralStorage.shared.appVolume = clamped",
+                  "        performOnMain { [weak self] in",
+                  "            self?.player.volume = clamped",
+                  "        }",
+                  "    }",
+                  "",
+                  "    func getAppVolume() -> Float {",
+                  "        stateLock.lock()",
+                  "        defer { stateLock.unlock() }",
+                  "        return desiredAppVolume",
+                  "    }",
+                ].join("\n")
+              );
+
+              const restoreAnchor = "        shuffleMode = GeneralStorage.shared.getSavedShuffleMode()";
+              if (!pm.includes(restoreAnchor)) {
+                throw new Error("未在 OrpheusPlayerManager.swift 找到 restoreState 锚点");
+              }
+              pm = pm.replace(
+                restoreAnchor,
+                [
+                  restoreAnchor,
+                  "        let savedAppVolume = GeneralStorage.shared.appVolume",
+                  "        stateLock.lock()",
+                  "        desiredAppVolume = savedAppVolume",
+                  "        stateLock.unlock()",
+                  "        performOnMain { [weak self] in",
+                  "            self?.player.volume = savedAppVolume",
+                  "        }",
+                ].join("\n")
+              );
+
+              fs.writeFileSync(pmPath, pm, "utf8");
+              console.log("✅ 已为 OrpheusPlayerManager.swift 注入独立应用音量控制");
+            }
+
+            // 3. 校验 ExpoOrpheusModule.swift 已暴露 setAppVolume / getAppVolume
+            const modPath = "packages/orpheus/ios/ExpoOrpheusModule.swift";
+            let mod = fs.readFileSync(modPath, "utf8");
+            if (!mod.includes("Function(\"setAppVolume\")")) {
+              throw new Error("ExpoOrpheusModule.swift 缺少 setAppVolume 接口");
+            }
+            console.log("✅ 已校验 ExpoOrpheusModule.swift 包含 setAppVolume / getAppVolume");
+          '
+          node -e '
+            const fs = require("fs");
             const myPath = "apps/mobile/src/app/(tabs)/my.tsx";
             if (fs.existsSync(myPath)) {
               let code = fs.readFileSync(myPath, "utf8");
