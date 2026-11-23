@@ -275,6 +275,7 @@ export default function PlayerPage() {
 	})
 
 	const [menuVisible, setMenuVisible] = useState(false)
+	const [externalOpenOffsetSignal, setExternalOpenOffsetSignal] = useState(0)
 
 	const jumpTo = (key: string) => {
 		const targetIndex = key === 'lyrics' ? 1 : 0
@@ -473,6 +474,7 @@ export default function PlayerPage() {
 								jumpTo={jumpTo}
 								imageRef={coverRef}
 								onPageScroll={pageScrollHandler}
+								externalOpenOffsetSignal={externalOpenOffsetSignal}
 							/>
 						) : (
 							<Computed>
@@ -530,6 +532,12 @@ export default function PlayerPage() {
 					<PlayerFunctionalMenu
 						menuVisible={menuVisible}
 						setMenuVisible={setMenuVisible}
+						showLandscapeLyricsActions={
+							isLandscape && !enableSplitPlayerLayout && index === 1
+						}
+						onOpenLyricsOffset={() =>
+							setExternalOpenOffsetSignal((count) => count + 1)
+						}
 					/>
 				</View>
 			</View>

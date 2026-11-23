@@ -83,6 +83,7 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 		return null
 	}
 
+	const isTabletPortrait = width >= 600 && !isLandscape
 	const paddingBottom = Math.max(insets.bottom + 14, 24)
 	const overlayHeight = 180 + paddingBottom
 
@@ -96,7 +97,16 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 			]}
 			pointerEvents='box-none'
 		>
-			<View style={[styles.playerControls, { paddingBottom }]}>
+			<View
+				style={[
+					styles.playerControls,
+					{ paddingBottom },
+					isTabletPortrait && {
+						maxWidth: Math.min(width - 96, 620),
+						alignSelf: 'center',
+					},
+				]}
+			>
 				{/* 功能按钮，位于 slider 上方右侧 */}
 				<View style={styles.actionMenuRow}>
 					<MenuView {...menuActions}>

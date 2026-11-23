@@ -1,6 +1,6 @@
 import { RepeatMode } from '@bbplayer/orpheus'
 import { useRouter } from 'expo-router'
-import { View } from 'react-native'
+import { useWindowDimensions, View } from 'react-native'
 import { useTheme } from 'react-native-paper'
 
 import IconButton from '@/components/common/IconButton'
@@ -21,6 +21,8 @@ import {
 
 export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 	const { colors } = useTheme()
+	const { width, height } = useWindowDimensions()
+	const secondaryIconSize = width >= 600 && height > width ? 26 : 24
 	const { shuffle: shuffleMode, repeat: repeatMode } = usePlaybackOptions()
 	const currentTrack = useCurrentTrack()
 	const router = useRouter()
@@ -33,7 +35,7 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 			<SecondaryPlaybackControls>
 				<IconButton
 					icon={shuffleMode ? 'shuffle-variant' : 'shuffle-disabled'}
-					size={24}
+					size={secondaryIconSize}
 					iconColor={shuffleMode ? colors.primary : colors.onSurfaceVariant}
 					onPress={async () => {
 						void Haptics.performHaptics(Haptics.AndroidHaptics.Confirm)
@@ -57,7 +59,7 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 								? 'repeat-once'
 								: 'repeat'
 					}
-					size={24}
+					size={secondaryIconSize}
 					iconColor={
 						repeatMode !== RepeatMode.OFF
 							? colors.primary
@@ -82,7 +84,7 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 				/>
 				<IconButton
 					icon='comment-text-outline'
-					size={24}
+					size={secondaryIconSize}
 					disabled={currentTrack?.source !== 'bilibili'}
 					onPress={() => {
 						if (currentTrack?.source === 'bilibili') {
@@ -96,7 +98,7 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 				/>
 				<IconButton
 					icon='format-list-bulleted'
-					size={24}
+					size={secondaryIconSize}
 					iconColor={colors.onSurfaceVariant}
 					onPress={() => {
 						void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { View } from 'react-native'
+import { useWindowDimensions, View } from 'react-native'
 import { useTheme } from 'react-native-paper'
 
 import IconButton from '@/components/common/IconButton'
@@ -16,6 +16,8 @@ import {
 
 export function PodcastControls() {
 	const { colors } = useTheme()
+	const { width, height } = useWindowDimensions()
+	const secondaryIconSize = width >= 600 && height > width ? 26 : 24
 	const { speed, sleepEndTime } = usePlaybackOptions()
 	const [now, setNow] = useState(() => Date.now())
 	useEffect(() => {
@@ -65,7 +67,7 @@ export function PodcastControls() {
 					<IconButton
 						key={action.icon}
 						icon={action.icon}
-						size={24}
+						size={secondaryIconSize}
 						iconColor={colors.onSurfaceVariant}
 						onPress={action.onPress}
 						accessibilityLabel={action.accessibilityLabel}

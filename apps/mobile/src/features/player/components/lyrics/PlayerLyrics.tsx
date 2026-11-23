@@ -38,15 +38,18 @@ const Lyrics = memo(function Lyrics({
 	currentIndex,
 	onPressBackground,
 	splitMode = false,
+	externalOpenOffsetSignal,
 }: {
 	currentIndex: number
 	onPressBackground?: () => void
 	splitMode?: boolean
+	externalOpenOffsetSignal?: number
 }) {
 	const insets = useSafeAreaInsets()
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
+	const isTabletPortrait = dimensions.width >= 600 && !isLandscape && !splitMode
 	const useSimpleFade = isLandscape || splitMode
 	const portraitControlsPaddingBottom = Math.max(insets.bottom + 14, 24)
 	const portraitBottomClearance = portraitControlsPaddingBottom + 150
@@ -71,6 +74,19 @@ const Lyrics = memo(function Lyrics({
 	)
 
 	const [offsetMenuVisible, setOffsetMenuVisible] = useState(false)
+	const lastHandledOffsetSignalRef = useRef(externalOpenOffsetSignal ?? 0)
+
+	useEffect(() => {
+		if (
+			externalOpenOffsetSignal !== undefined &&
+			externalOpenOffsetSignal > lastHandledOffsetSignalRef.current
+		) {
+			lastHandledOffsetSignalRef.current = externalOpenOffsetSignal
+			if (currentIndex === 1) {
+				setOffsetMenuVisible(true)
+			}
+		}
+	}, [externalOpenOffsetSignal, currentIndex])
 	const track = useCurrentTrack()
 	const enableOldSchoolStyleLyric = useAppStore(
 		(state) => state.settings.enableOldSchoolStyleLyric,
@@ -311,6 +327,7 @@ const Lyrics = memo(function Lyrics({
 					justifyContent: 'center',
 					pointerEvents: offsetMenuVisible ? 'none' : 'auto',
 					paddingTop: splitMode ? windowHeight * 0.08 : windowHeight * 0.04,
+					paddingHorizontal: isTabletPortrait ? 56 : 0,
 				}}
 				showsVerticalScrollIndicator={false}
 				scrollEventThrottle={30}
