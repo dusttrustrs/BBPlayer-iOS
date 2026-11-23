@@ -427,6 +427,10 @@ declare class NativeOrpheusModule extends NativeModule<OrpheusEvents> {
 	setPlaybackSpeed(speed: number): Promise<void>
 	/** 返回当前原生播放倍速。 */
 	getPlaybackSpeed(): Promise<number>
+	/** 设置 App 独立播放音量（0.0 ~ 1.0），不影响系统音量。 */
+	setAppVolume(volume: number): void
+	/** 获取当前 App 独立播放音量（0.0 ~ 1.0）。 */
+	getAppVolume(): number
 	/**
 	 * 触发原生播放错误路径，用于调试错误处理。
 	 *

@@ -247,6 +247,7 @@ class OrpheusMusicService : MediaLibraryService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .build()
+        player?.volume = GeneralStorage.getAppVolume()
 
         shuffleManager = ShuffleManager { player }
 
@@ -812,19 +813,35 @@ class OrpheusMusicService : MediaLibraryService() {
         }
     }
 
+    @Volatile
+    private var currentLoudnessGain: Float = 1.0f
+
+    fun applyAppVolume(volume: Float) {
+        val player = player ?: return
+        volumeFadeJob?.cancel()
+        val gain = if (GeneralStorage.isLoudnessNormalizationEnabled()) currentLoudnessGain else 1.0f
+        player.volume = (volume.coerceIn(0f, 1f) * gain).coerceIn(0f, 1f)
+    }
+
     @OptIn(UnstableApi::class)
     private fun applyVolumeForCurrentItem(measuredI: Double) {
         Log.d("LoudnessNormalization", "measuredI: $measuredI")
         val player = player ?: return
         volumeFadeJob?.cancel()
+        val appVolume = GeneralStorage.getAppVolume()
         val isLoudnessNormalizationEnabled = GeneralStorage.isLoudnessNormalizationEnabled()
-        if (!isLoudnessNormalizationEnabled) return
+        if (!isLoudnessNormalizationEnabled) {
+            currentLoudnessGain = 1.0f
+            player.volume = appVolume
+            return
+        }
         val gain = run {
             val target = -14.0 // bilibili 的这个值似乎是固定的
             if (measuredI == 0.0) 1.0f else calculateLoudnessGain(measuredI, target)
         }
+        currentLoudnessGain = gain
 
-        val targetVol = 1.0f * gain
+        val targetVol = (appVolume * gain).coerceIn(0f, 1f)
         val currentVolume = player.volume
 
         if (abs(currentVolume - targetVol) < 0.001f) {

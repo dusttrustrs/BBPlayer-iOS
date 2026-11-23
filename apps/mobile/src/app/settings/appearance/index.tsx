@@ -43,6 +43,9 @@ export default function AppearanceSettingsPage() {
 	const transparentBBPlayerCard = useAppStore(
 		(state) => state.settings.transparentBBPlayerCard ?? false,
 	)
+	const enableSplitPlayerLayout = useAppStore(
+		(state) => state.settings.enableSplitPlayerLayout ?? false,
+	)
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
 	)
@@ -219,6 +222,24 @@ export default function AppearanceSettingsPage() {
 					<UniversalSwitch
 						value={enableSpectrumVisualizer}
 						onValueChange={handleSpectrumToggle}
+					/>
+				</View>
+				<View style={styles.settingRow}>
+					<View style={styles.settingTextContainer}>
+						<Text>分栏歌词播放器布局</Text>
+						<Text
+							variant='bodySmall'
+							style={{ color: colors.onSurfaceVariant }}
+						>
+							开启后切换为左控右词布局：左上角为圆形封面，左下角集成播放控制与独立音量条，右侧常驻歌词并支持快捷切换歌词源
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={enableSplitPlayerLayout}
+						onValueChange={(value) =>
+							setSettings({ enableSplitPlayerLayout: value })
+						}
+						testID='split-player-layout-switch'
 					/>
 				</View>
 				{Platform.OS === 'android' && (

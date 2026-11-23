@@ -342,6 +342,12 @@ class LyricService {
 		item: LyricSearchResult[0],
 		uniqueKey: string,
 	): ResultAsync<LyricFileData, Error> {
+		const buildMisc = () => ({
+			source: item.source,
+			remoteId: item.remoteId,
+			title: item.title,
+			artist: item.artist,
+		})
 		switch (item.source) {
 			case 'netease':
 				return this.neteaseApi
@@ -352,6 +358,7 @@ class LyricService {
 							...lyrics,
 							id: uniqueKey,
 							updateTime: Date.now(),
+							misc: buildMisc(),
 						} as LyricFileData)
 					})
 					.andThen((lyrics) => {
@@ -366,6 +373,7 @@ class LyricService {
 							...lyrics,
 							id: uniqueKey,
 							updateTime: Date.now(),
+							misc: buildMisc(),
 						} as LyricFileData)
 					})
 					.andThen((lyrics) => {
@@ -380,6 +388,7 @@ class LyricService {
 							...lyrics,
 							id: uniqueKey,
 							updateTime: Date.now(),
+							misc: buildMisc(),
 						} as LyricFileData)
 					})
 					.andThen((lyrics) => {
@@ -388,6 +397,25 @@ class LyricService {
 			default:
 				return errAsync(new Error('未知歌曲源'))
 		}
+	}
+
+	/**
+	 * 为曲目解析最适合搜索歌词的关键词（B站视频优先尝试识别 BGM 歌名，否则清洗标题）
+	 */
+	public async resolveSearchKeyword(track: Track): Promise<string> {
+		if (
+			track.source === 'bilibili' &&
+			track.bilibiliMetadata.bvid &&
+			track.bilibiliMetadata.cid
+		) {
+			const preciseName = await this.getPreciseMusicNameOnBilibiliVideo(
+				track.bilibiliMetadata,
+			)
+			if (preciseName && preciseName.trim().length > 0) {
+				return preciseName.trim()
+			}
+		}
+		return this.cleanKeyword(track.title)
 	}
 
 	/**

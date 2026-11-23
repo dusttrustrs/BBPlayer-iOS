@@ -17,6 +17,7 @@ class GeneralStorage {
     private let KEY_AUTOPLAY_ENABLED = "autoplayOnStartEnabled"
     private let KEY_SPECTRUM_VISUALIZER_ENABLED = "spectrumVisualizerEnabled"
     private let KEY_BILIBILI_CDN = "preferredBilibiliCdn"
+    private let KEY_APP_VOLUME = "appVolume"
     
     // MARK: - Preferences
 
@@ -46,6 +47,18 @@ class GeneralStorage {
     var isSpectrumVisualizerEnabled: Bool {
         get { return mmkv?.bool(forKey: KEY_SPECTRUM_VISUALIZER_ENABLED, defaultValue: false) ?? false }
         set { mmkv?.set(newValue, forKey: KEY_SPECTRUM_VISUALIZER_ENABLED) }
+    }
+
+    var appVolume: Float {
+        get {
+            guard let mmkv = mmkv, mmkv.contains(key: KEY_APP_VOLUME) else {
+                return 1.0
+            }
+            return max(0.0, min(1.0, mmkv.float(forKey: KEY_APP_VOLUME, defaultValue: 1.0)))
+        }
+        set {
+            mmkv?.set(max(0.0, min(1.0, newValue)), forKey: KEY_APP_VOLUME)
+        }
     }
     
     // MARK: - Playback State

@@ -1196,6 +1196,18 @@ class ExpoOrpheusModule : Module() {
             withPlayerOnMainThread { it.playbackParameters.speed }
         }
 
+        Function("getAppVolume") {
+            GeneralStorage.getAppVolume().toDouble()
+        }
+
+        Function("setAppVolume") { volume: Double ->
+            val clamped = volume.toFloat().coerceIn(0f, 1f)
+            GeneralStorage.setAppVolume(clamped)
+            mainHandler.post {
+                OrpheusMusicService.instance?.applyAppVolume(clamped)
+            }
+        }
+
         Function("getLruCachedUris") { uris: List<String> ->
             try {
                 uris.filter { uri ->

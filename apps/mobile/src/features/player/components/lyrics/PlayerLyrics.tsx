@@ -32,18 +32,22 @@ import { toastAndLogError } from '@/utils/error-handling'
 import { ModernLyricLineItem, OldSchoolLyricLineItem } from './LyricLineItem'
 import { LyricsControlOverlay } from './LyricsControlOverlay'
 import { LyricsOffsetControl } from './LyricsOffsetControl'
+import { LyricSourcePicker } from './LyricSourcePicker'
 
 const Lyrics = memo(function Lyrics({
 	currentIndex,
 	onPressBackground,
+	splitMode = false,
 }: {
 	currentIndex: number
 	onPressBackground?: () => void
+	splitMode?: boolean
 }) {
 	const insets = useSafeAreaInsets()
 	const dimensions = useWindowDimensions()
 	const windowHeight = dimensions.height
 	const isLandscape = dimensions.width > dimensions.height
+	const useSimpleFade = isLandscape || splitMode
 	const portraitControlsPaddingBottom = Math.max(insets.bottom + 14, 24)
 	const portraitBottomClearance = portraitControlsPaddingBottom + 150
 	const portraitBottomFadeHeight = 28
@@ -58,12 +62,12 @@ const Lyrics = memo(function Lyrics({
 			const y = itemLayoutsRef.current[index]
 			if (y !== undefined && scrollViewRef.current) {
 				scrollViewRef.current.scrollTo({
-					y: Math.max(0, y - windowHeight * 0.18),
+					y: Math.max(0, y - windowHeight * (splitMode ? 0.26 : 0.18)),
 					animated,
 				})
 			}
 		},
-		[windowHeight],
+		[windowHeight, splitMode],
 	)
 
 	const [offsetMenuVisible, setOffsetMenuVisible] = useState(false)
@@ -212,27 +216,47 @@ const Lyrics = memo(function Lyrics({
 
 	if (!track) return null
 
+	const sourcePickerNode = splitMode ? (
+		<LyricSourcePicker
+			track={track}
+			currentLyrics={lyrics}
+			showTranslationToggle={!!lyrics?.tlyric && !!lyrics?.romalrc}
+			translationType={preferredLyricType}
+			onToggleTranslation={() =>
+				setPreferredLyricType((prev) =>
+					prev === 'translation' ? 'romaji' : 'translation',
+				)
+			}
+			onEditLyrics={handleEditLyrics}
+			onOpenOffsetMenu={handleOpenOffsetMenu}
+		/>
+	) : null
+
 	if (isPending) {
 		return (
 			<View style={styles.pendingContainer}>
 				<ActivityIndicator size={'large'} />
+				{sourcePickerNode}
 			</View>
 		)
 	}
 
 	if (isError) {
 		return (
-			<ScrollView
-				style={styles.errorScrollView}
-				contentContainerStyle={styles.errorContentContainer}
-			>
-				<Text
-					variant='bodyMedium'
-					style={styles.errorText}
+			<View style={styles.lyricsContainer}>
+				<ScrollView
+					style={styles.errorScrollView}
+					contentContainerStyle={styles.errorContentContainer}
 				>
-					歌词加载失败：{error.message}
-				</Text>
-			</ScrollView>
+					<Text
+						variant='bodyMedium'
+						style={styles.errorText}
+					>
+						歌词加载失败：{error.message}
+					</Text>
+				</ScrollView>
+				{sourcePickerNode}
+			</View>
 		)
 	}
 
@@ -260,10 +284,9 @@ const Lyrics = memo(function Lyrics({
 						styles.rawLyricsScrollViewContainer,
 						{
 							paddingTop: windowHeight * 0.05,
-							paddingBottom: Math.max(
-								windowHeight * 0.56,
-								portraitBottomScrollPadding,
-							),
+							paddingBottom: useSimpleFade
+								? Math.max(windowHeight * 0.25, 120)
+								: Math.max(windowHeight * 0.56, portraitBottomScrollPadding),
 						},
 					]}
 					scrollEventThrottle={16}
@@ -287,7 +310,7 @@ const Lyrics = memo(function Lyrics({
 				contentContainerStyle={{
 					justifyContent: 'center',
 					pointerEvents: offsetMenuVisible ? 'none' : 'auto',
-					paddingTop: windowHeight * 0.04,
+					paddingTop: splitMode ? windowHeight * 0.08 : windowHeight * 0.04,
 				}}
 				showsVerticalScrollIndicator={false}
 				scrollEventThrottle={30}
@@ -300,12 +323,14 @@ const Lyrics = memo(function Lyrics({
 								<Pressable
 									key='padding_item'
 									style={{
-										height: isLandscape
-											? 80
-											: Math.max(
-													windowHeight * 0.56,
-													portraitBottomScrollPadding,
-												),
+										height: splitMode
+											? Math.max(windowHeight * 0.36, 160)
+											: isLandscape
+												? 80
+												: Math.max(
+														windowHeight * 0.56,
+														portraitBottomScrollPadding,
+													),
 									}}
 									onPress={onPressBackground}
 								/>
@@ -379,7 +404,7 @@ const Lyrics = memo(function Lyrics({
 								}}
 							/>
 
-							{isLandscape ? (
+							{useSimpleFade ? (
 								<LinearGradient
 									style={styles.gradient}
 									start={{ x: 0, y: 0 }}
@@ -411,19 +436,24 @@ const Lyrics = memo(function Lyrics({
 				</MaskedView>
 			</View>
 
-			{/* 播放器控件覆盖层 */}
-			<LyricsControlOverlay
-				offsetMenuVisible={offsetMenuVisible}
-				showTranslationToggle={!!lyrics?.tlyric && !!lyrics?.romalrc}
-				translationType={preferredLyricType}
-				onToggleTranslation={() =>
-					setPreferredLyricType((prev) =>
-						prev === 'translation' ? 'romaji' : 'translation',
-					)
-				}
-				onEditLyrics={handleEditLyrics}
-				onOpenOffsetMenu={handleOpenOffsetMenu}
-			/>
+			{/* 播放器控件覆盖层（分栏模式由左侧控制区接管，不再重复渲染） */}
+			{!splitMode && (
+				<LyricsControlOverlay
+					offsetMenuVisible={offsetMenuVisible}
+					showTranslationToggle={!!lyrics?.tlyric && !!lyrics?.romalrc}
+					translationType={preferredLyricType}
+					onToggleTranslation={() =>
+						setPreferredLyricType((prev) =>
+							prev === 'translation' ? 'romaji' : 'translation',
+						)
+					}
+					onEditLyrics={handleEditLyrics}
+					onOpenOffsetMenu={handleOpenOffsetMenu}
+				/>
+			)}
+
+			{/* 分栏模式右下角圆形歌词源切换按钮与浮层 */}
+			{sourcePickerNode}
 
 			{/* 歌词偏移量调整面板 */}
 			<LyricsOffsetControl

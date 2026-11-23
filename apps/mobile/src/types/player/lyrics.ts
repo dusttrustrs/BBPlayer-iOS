@@ -69,6 +69,10 @@ export interface LyricFileData {
 	misc?:
 		| {
 				userOffset?: number | undefined // 用户设置的歌词偏移量
+				source?: 'netease' | 'qqmusic' | 'kugou' | undefined
+				remoteId?: string | number | undefined
+				title?: string | undefined
+				artist?: string | undefined
 		  }
 		| undefined
 }

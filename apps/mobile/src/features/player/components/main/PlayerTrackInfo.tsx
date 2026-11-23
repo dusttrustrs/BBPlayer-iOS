@@ -50,6 +50,7 @@ export function TrackInfo({
 	coverMaxSize,
 	spectrumVisibleHeight,
 	coverAnimatedStyle,
+	forceCircle = false,
 }: {
 	onArtistPress: () => void
 	onPressCover: () => void
@@ -62,6 +63,8 @@ export function TrackInfo({
 	spectrumVisibleHeight?: number
 	/** 切歌时独立的封面淡入淡出动画样式 */
 	coverAnimatedStyle?: ComponentProps<typeof Animated.View>['style']
+	/** 强制封面以正圆显示（用于分栏播放器布局） */
+	forceCircle?: boolean
 }) {
 	const { colors } = useTheme()
 	const { width: screenWidth } = useWindowDimensions()
@@ -170,10 +173,12 @@ export function TrackInfo({
 							playbackContextStore$.context.mode.get() === 'podcast'
 						const baseSize = podcast ? coverSizeRect : coverSizeCircle
 						const coverSize = coverMaxSize ? coverMaxSize : baseSize
-						const coverBorderRadius = podcast
-							? coverSize * SQUIRCLE_RADIUS_RATIO
-							: coverSize / 2
-						const showSpectrum = !podcast && enableSpectrumVisualizer
+						const coverBorderRadius =
+							podcast && !forceCircle
+								? coverSize * SQUIRCLE_RADIUS_RATIO
+								: coverSize / 2
+						const showSpectrum =
+							(!podcast || forceCircle) && enableSpectrumVisualizer
 						return (
 							<Pressable
 								style={[

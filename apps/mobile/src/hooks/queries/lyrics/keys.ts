@@ -5,4 +5,6 @@ export const lyricsQueryKeys = {
 		[...lyricsQueryKeys.all, 'smartFetchLyrics', uniqueKey] as const,
 	manualSearch: (uniqueKey?: string, query?: string) =>
 		[...lyricsQueryKeys.all, 'manualSearch', uniqueKey, query] as const,
+	trackCandidates: (uniqueKey?: string) =>
+		[...lyricsQueryKeys.all, 'trackCandidates', uniqueKey] as const,
 }

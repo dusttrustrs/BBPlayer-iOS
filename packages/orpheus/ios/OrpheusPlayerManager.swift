@@ -11,6 +11,7 @@ class OrpheusPlayerManager: NSObject {
     
     var repeatMode: RepeatMode = .off
     var shuffleMode: Bool = false
+    private var appVolume: Float = 1.0
     
 
     
@@ -33,6 +34,8 @@ class OrpheusPlayerManager: NSObject {
     override init() {
         self.player = AVPlayer()
         super.init()
+        self.appVolume = GeneralStorage.shared.appVolume
+        self.player.volume = self.appVolume
         setupPlayerObservers()
         setupAudioSession()
         setupRemoteCommands()
@@ -425,6 +428,7 @@ class OrpheusPlayerManager: NSObject {
         }
 
         player.replaceCurrentItem(with: item)
+        player.volume = appVolume
         if let startPos = startPosition, startPos > 0 {
              let time = CMTime(seconds: startPos, preferredTimescale: 1000)
              player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
@@ -631,6 +635,19 @@ class OrpheusPlayerManager: NSObject {
     
     func getPlaybackSpeed() -> Float {
         return player.rate
+    }
+
+    func setAppVolume(_ volume: Float) {
+        let clamped = max(0.0, min(1.0, volume))
+        appVolume = clamped
+        GeneralStorage.shared.appVolume = clamped
+        DispatchQueue.main.async { [weak self] in
+            self?.player.volume = clamped
+        }
+    }
+
+    func getAppVolume() -> Float {
+        return appVolume
     }
     
     // MARK: - Getters
