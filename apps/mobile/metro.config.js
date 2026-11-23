@@ -51,6 +51,10 @@ const IOS15_EXACT_ALIASES = {
 		IOS15_COMPAT_DIR,
 		'expo-ui-slider.tsx',
 	),
+	'@expo/ui/community/masked-view': path.join(
+		IOS15_COMPAT_DIR,
+		'masked-view-noop.ts',
+	),
 	'expo-widgets': path.join(IOS15_COMPAT_DIR, 'expo-widgets-noop.ts'),
 	'expo-glass-effect': path.join(
 		IOS15_COMPAT_DIR,

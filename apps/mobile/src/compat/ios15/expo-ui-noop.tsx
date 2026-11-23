@@ -30,6 +30,8 @@ export const clipShape = noopModifier
 export const lineLimit = noopModifier
 export const activityBackgroundTint = noopModifier
 export const widgetURL = noopModifier
+export const buttonStyle = noopModifier
+export const tint = noopModifier
 
 export function getMaterialColors() {
 	return null

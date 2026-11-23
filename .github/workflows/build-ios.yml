@@ -2630,6 +2630,155 @@ jobs:
           pkg.expo.autolinking.ios.exclude = Array.from(excludes);
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, "\t") + "\n", "utf8");
           console.log("✅ 已确认 iOS autolinking buildFromSource=['.*'] 与排除列表:", pkg.expo.autolinking.ios.exclude.join(", "));
+
+          // 8. 注入 RCTSetFatalHandler / RCTSetFatalExceptionHandler 到 ExpoAppSceneDelegate.swift：
+          //    React-Core-prebuilt 使用预编译 React.framework，源码级 patchReactNativeExceptionsPods 无法命中；
+          //    通过 React 公开 C API RCTSetFatalHandler 拦截未捕获 JS 异常，记录完整错误栈到沙盒日志并弹窗展示（支持一键复制/继续运行），
+          //    避免未捕获异常直接触发 objc_exception_throw -> SIGABRT 且被系统 .ips 隐藏报错信息。
+          const sceneDelegateFiles = walkFiles("node_modules", (name, full) =>
+            name === "ExpoAppSceneDelegate.swift" && full.includes("AppDelegates")
+          );
+          const fatalGuardSwift = [
+            "",
+            "#if os(iOS)",
+            "private final class BBPlayerIos15FatalGuard: @unchecked Sendable {",
+            "  static let shared = BBPlayerIos15FatalGuard()",
+            "",
+            "  private let lock = NSLock()",
+            "  private var installed = false",
+            "  private var isPresenting = false",
+            "  private var seenSignatures = Set<String>()",
+            "",
+            "  func install() {",
+            "    lock.lock()",
+            "    if installed {",
+            "      lock.unlock()",
+            "      return",
+            "    }",
+            "    installed = true",
+            "    lock.unlock()",
+            "",
+            "    RCTSetFatalHandler { [weak self] error in",
+            "      guard let self else { return }",
+            "      let nsError = error as NSError?",
+            '      let desc = nsError?.localizedDescription ?? "Unknown JS Fatal Error"',
+            "      var lines: [String] = [desc]",
+            '      if let stack = nsError?.userInfo["RCTJSStackTraceKey"] as? [[String: Any]], !stack.isEmpty {',
+            '        lines.append("")',
+            '        lines.append("JS Stack:")',
+            "        for frame in stack.prefix(20) {",
+            '          let method = (frame["methodName"] as? String) ?? "<anonymous>"',
+            '          let fileRaw = (frame["file"] as? String) ?? ""',
+            "          let file = (fileRaw as NSString).lastPathComponent",
+            '          let lineNum = frame["lineNumber"].map { String(describing: $0) } ?? "?"',
+            '          let colNum = frame["column"].map { String(describing: $0) } ?? "?"',
+            '          lines.append("  at \\(method) (\\(file):\\(lineNum):\\(colNum))")',
+            "        }",
+            "      }",
+            '      if let extra = nsError?.userInfo["RCTJSExtraDataKey"] as? String, !extra.isEmpty {',
+            '        lines.append("")',
+            '        lines.append("Extra:")',
+            "        lines.append(String(extra.prefix(2000)))",
+            "      }",
+            '      self.handleFatal(title: "JS 运行时异常 (iOS 15+ 保护)", summary: desc, fullReport: lines.joined(separator: "\\n"))',
+            "    }",
+            "",
+            "    RCTSetFatalExceptionHandler { [weak self] exception in",
+            "      guard let self else { return }",
+            '      let name = exception?.name.rawValue ?? "NSException"',
+            '      let reason = exception?.reason ?? "Unknown native exception"',
+            '      let symbols = (exception?.callStackSymbols ?? []).prefix(15).joined(separator: "\\n")',
+            '      let fullReport = "\\(name): \\(reason)\\n\\n\\(symbols)"',
+            '      self.handleFatal(title: "原生异常 (iOS 15+ 保护)", summary: "\\(name): \\(reason)", fullReport: fullReport)',
+            "    }",
+            "  }",
+            "",
+            "  private func handleFatal(title: String, summary: String, fullReport: String) {",
+            '    NSLog("🚨 [BBPlayer iOS15 FatalGuard] %@", fullReport)',
+            "    if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {",
+            '      let logUrl = docs.appendingPathComponent("last_js_fatal_error.txt")',
+            "      try? fullReport.write(to: logUrl, atomically: true, encoding: .utf8)",
+            "    }",
+            "",
+            "    let signature = String(summary.prefix(160))",
+            "    lock.lock()",
+            "    let shouldPresent = !isPresenting && !seenSignatures.contains(signature)",
+            "    if shouldPresent {",
+            "      seenSignatures.insert(signature)",
+            "      isPresenting = true",
+            "    }",
+            "    lock.unlock()",
+            "",
+            "    guard shouldPresent else { return }",
+            "",
+            "    let preview = String(fullReport.prefix(900))",
+            "    Task { @MainActor [weak self] in",
+            "      self?.presentAlert(title: title, preview: preview, fullReport: fullReport, attempt: 0)",
+            "    }",
+            "  }",
+            "",
+            "  @MainActor",
+            "  private func presentAlert(title: String, preview: String, fullReport: String, attempt: Int) {",
+            "    let allWindows = UIApplication.shared.connectedScenes",
+            "      .compactMap { $0 as? UIWindowScene }",
+            "      .flatMap { $0.windows }",
+            "    let window = allWindows.first { $0.isKeyWindow } ?? allWindows.first",
+            "",
+            "    guard var top = window?.rootViewController else {",
+            "      if attempt < 6 {",
+            "        Task { @MainActor [weak self] in",
+            "          try? await Task.sleep(nanoseconds: 500_000_000)",
+            "          self?.presentAlert(title: title, preview: preview, fullReport: fullReport, attempt: attempt + 1)",
+            "        }",
+            "      } else {",
+            "        lock.lock()",
+            "        isPresenting = false",
+            "        lock.unlock()",
+            "      }",
+            "      return",
+            "    }",
+            "",
+            "    while let presented = top.presentedViewController {",
+            "      top = presented",
+            "    }",
+            "",
+            "    let alert = UIAlertController(title: title, message: preview, preferredStyle: .alert)",
+            '    alert.addAction(UIAlertAction(title: "复制完整报错", style: .default) { [weak self] _ in',
+            "      UIPasteboard.general.string = fullReport",
+            "      self?.lock.lock()",
+            "      self?.isPresenting = false",
+            "      self?.lock.unlock()",
+            "    })",
+            '    alert.addAction(UIAlertAction(title: "忽略并继续", style: .cancel) { [weak self] _ in',
+            "      self?.lock.lock()",
+            "      self?.isPresenting = false",
+            "      self?.lock.unlock()",
+            "    })",
+            "    top.present(alert, animated: true)",
+            "  }",
+            "}",
+            "#endif",
+            "",
+          ].join("\n");
+          let sceneDelegatePatched = 0;
+          for (const f of sceneDelegateFiles) {
+            let orig = fs.readFileSync(f, "utf8");
+            if (orig.includes("BBPlayerIos15FatalGuard")) continue;
+            let next = orig.replace(
+              "    factory.startReactNative(",
+              "    #if os(iOS)\n    BBPlayerIos15FatalGuard.shared.install()\n    #endif\n    factory.startReactNative("
+            );
+            if (next === orig) {
+              throw new Error(`未能在 ExpoAppSceneDelegate.swift 定位 factory.startReactNative(: ${f}`);
+            }
+            next = next.trimEnd() + "\n" + fatalGuardSwift;
+            fs.writeFileSync(f, next, "utf8");
+            sceneDelegatePatched++;
+          }
+          if (sceneDelegateFiles.length === 0) {
+            throw new Error("未在 node_modules 中找到 ExpoAppSceneDelegate.swift");
+          }
+          console.log(`✅ 已为 ${sceneDelegatePatched} 个 ExpoAppSceneDelegate.swift 注入 RCTSetFatalHandler 异常保护`);
           EOF
 
       - name: 📱 生成 iOS 原生工程 (Expo Prebuild - iOS 15.0)
@@ -2750,6 +2899,10 @@ jobs:
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "${plistPath}" 2>/dev/null || true`);
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string MaterialDesignIcons.ttf" "${plistPath}" 2>/dev/null || true`);
               console.log("✅ PlistBuddy: 已追加 UIAppFonts (MaterialDesignIcons.ttf)");
+            }
+            if (!content.includes("ExpoShareIntoAppGroupId")) {
+              execSync(`/usr/libexec/PlistBuddy -c "Add :ExpoShareIntoAppGroupId string group.com.roitium.bbplayer" "${plistPath}" 2>/dev/null || true`);
+              console.log("✅ PlistBuddy: 已追加 ExpoShareIntoAppGroupId");
             }
             if (!content.includes("audio")) {
               execSync(`/usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "${plistPath}" 2>/dev/null || true`);
