@@ -12,7 +12,6 @@ const {
 	wrapWithReanimatedMetroConfig,
 } = require('react-native-reanimated/metro-config')
 const { getBundleModeMetroConfig } = require('react-native-worklets/bundleMode')
-const { withBoostConfig } = require('react-native-boost/metro')
 
 const sentryConfig = getSentryExpoConfig(__dirname, {
 	annotateReactComponents: true,
@@ -27,17 +26,10 @@ const withReanimated = wrapWithReanimatedMetroConfig(sentryConfig)
 
 const withWorklets = getBundleModeMetroConfig(withReanimated)
 
-const withBoost = withBoostConfig(withWorklets, {
-	logLevel: 'debug',
-	ignores: [
-		'node_modules/**',
-		'../../node_modules/**',
-		path.resolve(
-			__dirname,
-			'../../packages/react-native-bottom-tabs/src/TabView.tsx',
-		),
-	],
-})
+// iOS 15.0+ compatibility: disable react-native-boost on old-dev.
+// react-native-boost monkey-patches Metro's Graph traversal and rewrites <View>/<Text>/<Image>
+// into require('react-native-boost/runtime').NativeViewWithContext, which fails on iOS 15/16
+// (TypeError: Cannot read property 'NativeViewWithContext' of undefined at RootLayout).
 
 const IOS15_COMPAT_DIR = path.resolve(__dirname, 'src/compat/ios15')
 const IOS15_EXACT_ALIASES = {
@@ -115,7 +107,7 @@ function applyIos15CompatResolver(metroConfig) {
 	return metroConfig
 }
 
-const rozeniteConfig = withRozenite(withBoost, {
+const rozeniteConfig = withRozenite(withWorklets, {
 	enabled: process.env.WITH_ROZENITE === 'true',
 	enhanceMetroConfig: (cfg) =>
 		withRozeniteBundleDiscoveryPlugin(withRozeniteRequireProfiler(cfg)),
