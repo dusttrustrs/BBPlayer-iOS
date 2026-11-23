@@ -6,7 +6,7 @@ import {
 } from '@bbplayer/orpheus'
 import LottieView, { type AnimationObject } from 'lottie-react-native'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Touchable } from 'react-native-gesture-handler'
 import { useTheme } from 'react-native-paper'
 
@@ -122,9 +122,11 @@ export function MainPlaybackControls({
 		}
 	}, [debouncedIsPlaying, debouncedBuffering])
 
-	const skipButtonSize = size === 'compact' ? 40 : 46
-	const playButtonSize = size === 'compact' ? 80 : 96
-	const gap = size === 'compact' ? 24 : 40
+	const { width, height } = useWindowDimensions()
+	const isTabletPortrait = width >= 600 && height > width
+	const skipButtonSize = size === 'compact' ? 40 : isTabletPortrait ? 54 : 46
+	const playButtonSize = size === 'compact' ? 80 : isTabletPortrait ? 108 : 96
+	const gap = size === 'compact' ? 24 : isTabletPortrait ? 52 : 40
 
 	// 我知道这 tmd 是一种究极无敌肮脏的 hack，但没办法，colorFilters 不生效啊...
 	const tintedSkipPrev = useMemo(
@@ -333,7 +335,18 @@ export function SecondaryPlaybackControls({
 }: {
 	children: React.ReactNode
 }) {
-	return <View style={styles.secondaryControlsContainer}>{children}</View>
+	const { width, height } = useWindowDimensions()
+	const isTabletPortrait = width >= 600 && height > width
+	return (
+		<View
+			style={[
+				styles.secondaryControlsContainer,
+				isTabletPortrait && { gap: 48 },
+			]}
+		>
+			{children}
+		</View>
+	)
 }
 
 const styles = StyleSheet.create({

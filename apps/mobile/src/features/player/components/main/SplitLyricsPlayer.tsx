@@ -264,6 +264,7 @@ export function SplitLyricsPlayer({
 	if (!currentTrack) return null
 
 	const isTabletWide = width >= 760
+	const isTallPortrait = height > width
 	const isCompactWidth = width < 520
 
 	const padLeft = Math.max(
@@ -277,7 +278,13 @@ export function SplitLyricsPlayer({
 	const padBottom = Math.max(insets.bottom, 12)
 	const availHeight = Math.max(300, height - insets.top - 56 - padBottom)
 
-	const leftRatio = isTabletWide ? 0.39 : isCompactWidth ? 0.47 : 0.42
+	const leftRatio = isTabletWide
+		? isTallPortrait
+			? 0.42
+			: 0.39
+		: isCompactWidth
+			? 0.47
+			: 0.42
 	const leftColumnWidth = isTabletWide
 		? Math.min(Math.max(width * leftRatio, 300), 430)
 		: Math.max(width * leftRatio, 168)
@@ -285,7 +292,7 @@ export function SplitLyricsPlayer({
 	const leftContentWidth = Math.max(140, leftColumnWidth - leftInnerPadding * 2)
 
 	// 预留给下方控制区域的高度（信息行 + 进度条 + 5键控制行 + 音量条 + 间距）
-	const reservedBottomHeight = isCompactWidth ? 236 : 268
+	const reservedBottomHeight = isCompactWidth ? 236 : 272
 	const maxCoverByHeight = Math.max(110, availHeight - reservedBottomHeight)
 	const maxCoverByWidth = leftContentWidth * (isCompactWidth ? 0.84 : 0.78)
 	const coverSize = Math.floor(
@@ -293,6 +300,10 @@ export function SplitLyricsPlayer({
 	)
 	const needsVerticalScroll =
 		availHeight < coverSize + reservedBottomHeight + 16
+	const coverToControlsGap = Math.min(
+		Math.max((availHeight - coverSize - reservedBottomHeight) * 0.18, 16),
+		48,
+	)
 
 	const playModeIcon = shuffleMode
 		? 'shuffle-variant'
@@ -313,9 +324,11 @@ export function SplitLyricsPlayer({
 		? 'rgba(255, 255, 255, 0.72)'
 		: colors.onSurfaceVariant
 
-	const mainPlayIconSize = isCompactWidth ? 34 : 44
-	const skipIconSize = isCompactWidth ? 24 : 30
-	const sideIconSize = isCompactWidth ? 19 : 22
+	const mainPlayIconSize = isCompactWidth ? 30 : 44
+	const skipIconSize = isCompactWidth ? 22 : 30
+	const sideIconSize = isCompactWidth ? 18 : 22
+	const transportBtnSize = isCompactWidth ? 30 : 40
+	const playPauseBtnSize = isCompactWidth ? 40 : 56
 
 	const leftColumnContent = (
 		<View
@@ -323,6 +336,8 @@ export function SplitLyricsPlayer({
 				styles.leftInner,
 				{
 					paddingHorizontal: leftInnerPadding,
+					justifyContent: isTallPortrait ? 'center' : 'space-between',
+					gap: isTallPortrait ? coverToControlsGap : 0,
 					minHeight: needsVerticalScroll ? undefined : availHeight - 12,
 				},
 			]}
@@ -331,6 +346,7 @@ export function SplitLyricsPlayer({
 			<View
 				style={[
 					styles.coverWrapper,
+					isTallPortrait && { flex: 0 },
 					{
 						minHeight: coverSize + (isCompactWidth ? 12 : 24),
 					},
@@ -458,7 +474,12 @@ export function SplitLyricsPlayer({
 						hitSlop={8}
 						style={({ pressed }) => [
 							styles.transportBtn,
-							{ opacity: pressed ? 0.6 : 1 },
+							{
+								width: transportBtnSize,
+								height: transportBtnSize,
+								borderRadius: transportBtnSize / 2,
+								opacity: pressed ? 0.6 : 1,
+							},
 						]}
 						accessibilityRole='button'
 						accessibilityLabel='切换播放模式'
@@ -476,7 +497,12 @@ export function SplitLyricsPlayer({
 						hitSlop={8}
 						style={({ pressed }) => [
 							styles.transportBtn,
-							{ opacity: pressed ? 0.6 : 1 },
+							{
+								width: transportBtnSize,
+								height: transportBtnSize,
+								borderRadius: transportBtnSize / 2,
+								opacity: pressed ? 0.6 : 1,
+							},
 						]}
 						accessibilityRole='button'
 						accessibilityLabel='上一首'
@@ -495,8 +521,8 @@ export function SplitLyricsPlayer({
 						style={({ pressed }) => [
 							styles.playPauseBtn,
 							{
-								width: isCompactWidth ? 46 : 56,
-								height: isCompactWidth ? 46 : 56,
+								width: playPauseBtnSize,
+								height: playPauseBtnSize,
 								opacity: pressed ? 0.7 : 1,
 								transform: [{ scale: pressed ? 0.94 : 1 }],
 							},
@@ -524,7 +550,12 @@ export function SplitLyricsPlayer({
 						hitSlop={8}
 						style={({ pressed }) => [
 							styles.transportBtn,
-							{ opacity: pressed ? 0.6 : 1 },
+							{
+								width: transportBtnSize,
+								height: transportBtnSize,
+								borderRadius: transportBtnSize / 2,
+								opacity: pressed ? 0.6 : 1,
+							},
 						]}
 						accessibilityRole='button'
 						accessibilityLabel='下一首'
@@ -542,7 +573,12 @@ export function SplitLyricsPlayer({
 						hitSlop={8}
 						style={({ pressed }) => [
 							styles.transportBtn,
-							{ opacity: pressed ? 0.6 : 1 },
+							{
+								width: transportBtnSize,
+								height: transportBtnSize,
+								borderRadius: transportBtnSize / 2,
+								opacity: pressed ? 0.6 : 1,
+							},
 						]}
 						accessibilityRole='button'
 						accessibilityLabel='播放列表'

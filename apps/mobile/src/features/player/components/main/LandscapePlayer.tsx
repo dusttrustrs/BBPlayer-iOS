@@ -153,6 +153,7 @@ export function LandscapePlayer({
 	jumpTo,
 	imageRef,
 	onPageScroll,
+	externalOpenOffsetSignal,
 }: {
 	pagerRef: RefObject<PagerView | null>
 	index: number
@@ -160,6 +161,7 @@ export function LandscapePlayer({
 	jumpTo: (key: string) => void
 	imageRef: ImageRef | null
 	onPageScroll: ComponentProps<typeof AnimatedPagerView>['onPageScroll']
+	externalOpenOffsetSignal?: number
 }) {
 	const router = useRouter()
 	const insets = useSafeAreaInsets()
@@ -634,6 +636,7 @@ export function LandscapePlayer({
 											<Lyrics
 												currentIndex={index}
 												onPressBackground={() => jumpTo('main')}
+												externalOpenOffsetSignal={externalOpenOffsetSignal}
 											/>
 										)}
 									</View>,

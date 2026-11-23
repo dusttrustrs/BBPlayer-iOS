@@ -2,7 +2,12 @@ import type { Track as OrpheusTrack } from '@bbplayer/orpheus'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { type ComponentProps, memo } from 'react'
-import { StyleSheet, useColorScheme, View } from 'react-native'
+import {
+	StyleSheet,
+	useColorScheme,
+	useWindowDimensions,
+	View,
+} from 'react-native'
 import SquircleView from 'react-native-fast-squircle'
 import { Icon, Text, useTheme } from 'react-native-paper'
 import Animated from 'react-native-reanimated'
@@ -35,12 +40,33 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 	const theme = useTheme()
 	const colors = theme.colors
 	const isDark = useColorScheme() === 'dark'
+	const { height } = useWindowDimensions()
 
 	if (!track) return null
 
 	const podcast = playbackContextStore$.context.mode.get() === 'podcast'
-	const coverSizeRect = width - 80
-	const coverSize = podcast ? coverSizeRect : width - 120
+	const isTabletPortrait = width >= 600 && height > width
+	const tabletContentMaxWidth = Math.min(width - 96, 620)
+	const portraitAvailCoverHeight = Math.max(220, height - 460)
+	const coverSizeRect = isTabletPortrait
+		? Math.floor(
+				Math.min(
+					tabletContentMaxWidth * 0.72,
+					portraitAvailCoverHeight * 0.62,
+					420,
+				),
+			)
+		: Math.floor(Math.min(width - 80, portraitAvailCoverHeight))
+	const coverSizeCircle = isTabletPortrait
+		? Math.floor(
+				Math.min(
+					tabletContentMaxWidth * 0.66,
+					portraitAvailCoverHeight * 0.56,
+					380,
+				),
+			)
+		: Math.floor(Math.min(width - 120, portraitAvailCoverHeight - 24))
+	const coverSize = podcast ? coverSizeRect : coverSizeCircle
 	const coverRadius = podcast
 		? coverSizeRect * SQUIRCLE_RADIUS_RATIO
 		: coverSize / 2
@@ -57,6 +83,13 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 			: undefined
 
 	const durationStr = formatDurationToHHMMSS(Math.trunc(track.duration ?? 0))
+	const tabletColumnStyle = isTabletPortrait
+		? {
+				width: '100%' as const,
+				maxWidth: tabletContentMaxWidth,
+				alignSelf: 'center' as const,
+			}
+		: null
 
 	return (
 		<View style={styles.container}>
@@ -114,7 +147,7 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 						</Animated.View>
 					</View>
 
-					<View style={styles.trackInfoContainer}>
+					<View style={[styles.trackInfoContainer, tabletColumnStyle]}>
 						<View style={styles.trackTitleContainer}>
 							<View style={styles.trackTitleTextContainer}>
 								<Text
@@ -154,6 +187,7 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 				style={[
 					{ paddingBottom: Math.max(insets.bottom + 20, 20) },
 					styles.controlsContainer,
+					tabletColumnStyle,
 				]}
 			>
 				{/* PlayerSlider 等高占位 */}
@@ -198,15 +232,27 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 				{/* PlayerControls 等高占位 */}
 				<View>
 					<View style={styles.mainControlsWrapper}>
-						<View style={styles.mainControlsRow}>
-							<View style={styles.skipBtnBox}>
+						<View
+							style={[styles.mainControlsRow, isTabletPortrait && { gap: 52 }]}
+						>
+							<View
+								style={[
+									styles.skipBtnBox,
+									isTabletPortrait && { width: 54, height: 54 },
+								]}
+							>
 								<Icon
 									source='skip-previous'
-									size={32}
+									size={isTabletPortrait ? 36 : 32}
 									color={colors.onSurfaceVariant}
 								/>
 							</View>
-							<View style={styles.playBtnBox}>
+							<View
+								style={[
+									styles.playBtnBox,
+									isTabletPortrait && { width: 108, height: 108 },
+								]}
+							>
 								<View
 									style={[
 										styles.playBtnCircle,
@@ -220,16 +266,26 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 									/>
 								</View>
 							</View>
-							<View style={styles.skipBtnBox}>
+							<View
+								style={[
+									styles.skipBtnBox,
+									isTabletPortrait && { width: 54, height: 54 },
+								]}
+							>
 								<Icon
 									source='skip-next'
-									size={32}
+									size={isTabletPortrait ? 36 : 32}
 									color={colors.onSurfaceVariant}
 								/>
 							</View>
 						</View>
 					</View>
-					<View style={styles.secondaryControlsRow}>
+					<View
+						style={[
+							styles.secondaryControlsRow,
+							isTabletPortrait && { gap: 48 },
+						]}
+					>
 						{(podcast
 							? [
 									'speedometer',
@@ -250,7 +306,7 @@ export const PlayerTrackPreview = memo(function PlayerTrackPreview({
 							>
 								<Icon
 									source={iconName}
-									size={24}
+									size={isTabletPortrait ? 26 : 24}
 									color={colors.onSurfaceVariant}
 								/>
 							</View>

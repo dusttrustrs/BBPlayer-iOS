@@ -581,6 +581,12 @@ const PlayerMainTab = memo(function PlayerMainTab({
 							style={[
 								{ paddingBottom: Math.max(insets.bottom + 20, 20) },
 								styles.controlsContainer,
+								width >= 600 &&
+									height > width && {
+										width: '100%',
+										maxWidth: Math.min(width - 96, 620),
+										alignSelf: 'center',
+									},
 							]}
 						>
 							{subtitlesHint.visible && (

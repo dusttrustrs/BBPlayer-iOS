@@ -67,7 +67,7 @@ export function TrackInfo({
 	forceCircle?: boolean
 }) {
 	const { colors } = useTheme()
-	const { width: screenWidth } = useWindowDimensions()
+	const { width: screenWidth, height: screenHeight } = useWindowDimensions()
 
 	const colorScheme: ColorSchemeName = useColorScheme()
 	const isDark: boolean = colorScheme === 'dark'
@@ -152,8 +152,27 @@ export function TrackInfo({
 
 	if (!currentTrack) return null
 
-	const coverSizeRect = screenWidth - 80
-	const coverSizeCircle = screenWidth - 120
+	const isTabletPortrait = screenWidth >= 600 && screenHeight > screenWidth
+	const tabletContentMaxWidth = Math.min(screenWidth - 96, 620)
+	const portraitAvailCoverHeight = Math.max(220, screenHeight - 460)
+	const coverSizeRect = isTabletPortrait
+		? Math.floor(
+				Math.min(
+					tabletContentMaxWidth * 0.72,
+					portraitAvailCoverHeight * 0.62,
+					420,
+				),
+			)
+		: Math.floor(Math.min(screenWidth - 80, portraitAvailCoverHeight))
+	const coverSizeCircle = isTabletPortrait
+		? Math.floor(
+				Math.min(
+					tabletContentMaxWidth * 0.66,
+					portraitAvailCoverHeight * 0.56,
+					380,
+				),
+			)
+		: Math.floor(Math.min(screenWidth - 120, portraitAvailCoverHeight - 24))
 
 	return (
 		<View
@@ -179,11 +198,14 @@ export function TrackInfo({
 								: coverSize / 2
 						const showSpectrum =
 							(!podcast || forceCircle) && enableSpectrumVisualizer
+						const portraitSlotHeight = showSpectrum
+							? Math.max(coverSize + 96, coverSizeRect + 48)
+							: coverSizeRect + 48
 						return (
 							<Pressable
 								style={[
 									styles.coverContainer,
-									{ height: coverSizeRect + 48, overflow: 'visible' },
+									{ height: portraitSlotHeight, overflow: 'visible' },
 									coverMaxSize
 										? {
 												width: coverMaxSize,
@@ -295,7 +317,13 @@ export function TrackInfo({
 						styles.trackInfoContainer,
 						coverMaxSize !== undefined || part === 'info'
 							? { paddingHorizontal: 0 }
-							: null,
+							: isTabletPortrait
+								? {
+										width: '100%',
+										maxWidth: tabletContentMaxWidth,
+										alignSelf: 'center',
+									}
+								: null,
 					]}
 				>
 					<View style={styles.trackTitleContainer}>

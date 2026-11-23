@@ -13,9 +13,13 @@ import { PodcastFunctionalMenu } from './PodcastFunctionalMenu'
 export function PlayerFunctionalMenu({
 	menuVisible,
 	setMenuVisible,
+	showLandscapeLyricsActions = false,
+	onOpenLyricsOffset,
 }: {
 	menuVisible: boolean
 	setMenuVisible: (visible: boolean) => void
+	showLandscapeLyricsActions?: boolean
+	onOpenLyricsOffset?: () => void
 }) {
 	const { colors } = useTheme()
 	const sheetRef = useRef<TrueSheet>(null)
@@ -79,7 +83,11 @@ export function PlayerFunctionalMenu({
 					{playbackContextStore$.context.mode.get() === 'podcast' ? (
 						<PodcastFunctionalMenu onAction={handleAction} />
 					) : (
-						<MusicFunctionalMenu onAction={handleAction} />
+						<MusicFunctionalMenu
+							onAction={handleAction}
+							showLandscapeLyricsActions={showLandscapeLyricsActions}
+							onOpenLyricsOffset={onOpenLyricsOffset}
+						/>
 					)}
 				</Computed>
 			</ScrollView>
