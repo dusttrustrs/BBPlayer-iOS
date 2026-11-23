@@ -82,6 +82,18 @@ function applyIos15CompatResolver(metroConfig) {
 		...metroConfig.resolver,
 		resolveRequest(context, moduleName, platform) {
 			if (platform === 'ios') {
+				if (
+					(moduleName === './NativeImageLoaderIOS' ||
+						moduleName.endsWith('/NativeImageLoaderIOS')) &&
+					context.originModulePath.includes(
+						`${path.sep}react-native${path.sep}`,
+					)
+				) {
+					return {
+						filePath: path.join(IOS15_COMPAT_DIR, 'native-image-loader-ios.ts'),
+						type: 'sourceFile',
+					}
+				}
 				const exactTarget = IOS15_EXACT_ALIASES[moduleName]
 				if (exactTarget) {
 					return {

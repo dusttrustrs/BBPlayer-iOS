@@ -66,6 +66,17 @@ logger.info(
 )
 
 export function initializeSentry() {
+	// Capture React Native's synchronous ExceptionsManager handler BEFORE Sentry.init()
+	// wraps ErrorUtils with its async 2s flush handler. Otherwise, a root-cause error
+	// caught by Metro's guardedLoadModule is delayed 2s by Sentry while the caller
+	// immediately throws a secondary "Cannot read property '...' of undefined" error.
+	// oxlint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+	const preInitErrorUtils = (global as any).ErrorUtils
+	// oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+	const nativeSyncErrorHandler = preInitErrorUtils?.getGlobalHandler?.() as
+		| ((error: Error, isFatal: boolean) => void)
+		| undefined
+
 	Sentry.init({
 		dsn: 'https://893ea8eb3743da1e065f56b3aa5e96f9@o4508985265618944.ingest.us.sentry.io/4508985267191808',
 		debug: false,
@@ -118,6 +129,11 @@ export function initializeSentry() {
 						isFatal: String(isFatal),
 					},
 				})
+
+				if (Platform.OS === 'ios' && isFatal && nativeSyncErrorHandler) {
+					nativeSyncErrorHandler(error, isFatal)
+					return
+				}
 
 				// oxlint-disable-next-line @typescript-eslint/no-unsafe-call
 				originalErrorHandler(error, isFatal)
