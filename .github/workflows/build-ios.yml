@@ -2558,6 +2558,57 @@ jobs:
           }
           console.log(`✅ 已修补 ${jsiValuePatched} 个 ExpoModulesJSI Value 文件 (消除 _swift_getExtendedExistentialTypeMetadata)`);
 
+          // (b2) 修补 Task+immediate.swift 与 DeferredPromise.swift：
+          //      由于 ExpoModulesJSI 需开启 -disable-availability-checking 绕过 SWIFT_IMMORTAL_REFERENCE 16.4 门禁，
+          //      Swift 6.3 会将 `if #available(iOS 26.0, *)` 常量折叠为 true（直接调用 Task.immediate -> NULL 的
+          //      _swift_task_isCurrentExecutorWithFlags 触发 SIGSEGV 0x0 闪退），并将 `withCheckedThrowingContinuation`
+          //      直接绑定到 iOS 18.0+ 无守卫符号 `_$ss31withCheckedThrowingContinuation9isolation...`。
+          //      改为无条件使用 iOS 13.0+ 的 `Task(priority:operation:)` 与 `withUnsafeThrowingContinuation`。
+          const taskImmediateFiles = walkFiles("node_modules", (name, full) =>
+            name === "Task+immediate.swift" && full.includes("expo-modules-jsi")
+          );
+          let taskImmediatePatched = 0;
+          for (const f of taskImmediateFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            const next = orig.replace(
+              /if #available\([^\n]+\)\s*\{[\s\S]*?return Task\(name:\s*name,\s*priority:\s*\.high,\s*operation:\s*operation\)\s*\}/,
+              "return Task(priority: priority ?? .high, operation: operation)"
+            );
+            if (next.includes("Task.immediate(") || next.includes("Task(name:")) {
+              throw new Error(`ExpoModulesJSI Task+immediate.swift 修补不完整: ${f}`);
+            }
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              taskImmediatePatched++;
+            }
+          }
+          if (taskImmediateFiles.length === 0) {
+            throw new Error("未在 node_modules 中找到 ExpoModulesJSI Task+immediate.swift");
+          }
+          console.log(`✅ 已修补 ${taskImmediatePatched} 个 ExpoModulesJSI Task+immediate.swift (移除 iOS 18+/26+ Task.immediate 符号调用)`);
+
+          const deferredPromiseFiles = walkFiles("node_modules", (name, full) =>
+            name === "DeferredPromise.swift" && full.includes("expo-modules-jsi")
+          );
+          let deferredPromisePatched = 0;
+          for (const f of deferredPromiseFiles) {
+            const orig = fs.readFileSync(f, "utf8");
+            const next = orig
+              .replace(/CheckedContinuation</g, "UnsafeContinuation<")
+              .replace(/withCheckedThrowingContinuation\s*\{/g, "withUnsafeThrowingContinuation {");
+            if (next.includes("withCheckedThrowingContinuation")) {
+              throw new Error(`ExpoModulesJSI DeferredPromise.swift 修补不完整: ${f}`);
+            }
+            if (next !== orig) {
+              fs.writeFileSync(f, next, "utf8");
+              deferredPromisePatched++;
+            }
+          }
+          if (deferredPromiseFiles.length === 0) {
+            throw new Error("未在 node_modules 中找到 ExpoModulesJSI DeferredPromise.swift");
+          }
+          console.log(`✅ 已修补 ${deferredPromisePatched} 个 ExpoModulesJSI DeferredPromise.swift (消除 iOS 18+ withCheckedThrowingContinuation(isolation:) 符号)`);
+
           const spmFiles = walkFiles("node_modules", (name, full) =>
             name === "Package.swift" && full.includes("expo-modules-jsi")
           );
@@ -3456,7 +3507,15 @@ jobs:
                 otool -L "$fw/$FW_EXEC"
                 if [ "$FW_EXEC" = "ExpoModulesJSI" ]; then
                   echo "🔍 ExpoModulesJSI Swift 运行时导入符号 (dyld_info -imports):"
-                  xcrun dyld_info -imports "$fw/$FW_EXEC" | grep -E "libswift|Swift|swift_" || true
+                  JSI_SWIFT_IMPORTS=$(xcrun dyld_info -imports "$fw/$FW_EXEC" | grep -E "libswift|Swift|swift_" || true)
+                  echo "$JSI_SWIFT_IMPORTS"
+                  BAD_JSI_WEAK=$(echo "$JSI_SWIFT_IMPORTS" | grep -E "(_swift_task_immediate|_swift_task_isCurrentExecutorWithFlags|withCheckedThrowingContinuation9isolation|withCheckedContinuation9isolation|withUnsafeThrowingContinuation9isolation)" || true)
+                  if [ -n "$BAD_JSI_WEAK" ]; then
+                    echo "❌ 致命错误：ExpoModulesJSI 仍存在无守卫的 iOS 18+/26+ Swift Concurrency 弱导入符号，iOS 15-17 启动将触发 SIGSEGV 0x0！"
+                    echo "$BAD_JSI_WEAK"
+                    exit 1
+                  fi
+                  echo "✅ ExpoModulesJSI 校验通过：0 个 iOS 18+/26+ Swift Concurrency 危险符号 (_swift_task_immediate / _swift_task_isCurrentExecutorWithFlags / withCheckedThrowingContinuation(isolation:))"
                 fi
               fi
             done
