@@ -10,7 +10,7 @@ on:
         type: string
   push:
     branches:
-      - new-dev
+      - old-dev
     paths:
       - 'apps/mobile/**'
       - 'packages/**'
