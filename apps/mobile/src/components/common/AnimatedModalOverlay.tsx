@@ -1,13 +1,10 @@
 import { useState } from 'react'
 import type { ViewStyle } from 'react-native'
-import { Pressable, StyleSheet, useWindowDimensions } from 'react-native'
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
 import SquircleView from 'react-native-fast-squircle'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import { useTheme } from 'react-native-paper'
-import {
-	createAnimatedComponent,
-	useAnimatedStyle,
-} from 'react-native-reanimated'
+import Animated, { useAnimatedStyle } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 interface Props {
@@ -16,8 +13,6 @@ interface Props {
 	children?: React.ReactNode
 	contentStyle?: ViewStyle
 }
-
-const AnimatedPressable = createAnimatedComponent(Pressable)
 
 export default function AnimatedModalOverlay({
 	visible,
@@ -49,11 +44,12 @@ export default function AnimatedModalOverlay({
 		: undefined
 
 	return (
-		<AnimatedPressable
-			style={[styles.wrapper, wrapperAvoiding]}
-			onPress={onDismiss}
-		>
+		<Animated.View style={[styles.wrapper, wrapperAvoiding]}>
 			<Pressable
+				style={StyleSheet.absoluteFill}
+				onPress={onDismiss}
+			/>
+			<View
 				style={[
 					styles.content,
 					{
@@ -70,7 +66,6 @@ export default function AnimatedModalOverlay({
 						e.nativeEvent.layout.height > 0 && e.nativeEvent.layout.width > 0,
 					)
 				}}
-				onPress={(e) => e.stopPropagation()}
 			>
 				<SquircleView
 					style={[
@@ -85,8 +80,8 @@ export default function AnimatedModalOverlay({
 				>
 					{children}
 				</SquircleView>
-			</Pressable>
-		</AnimatedPressable>
+			</View>
+		</Animated.View>
 	)
 }
 
