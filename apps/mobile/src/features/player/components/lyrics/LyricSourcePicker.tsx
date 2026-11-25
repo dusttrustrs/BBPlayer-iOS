@@ -4,6 +4,7 @@ import {
 	ScrollView,
 	StyleSheet,
 	useColorScheme,
+	useWindowDimensions,
 	View,
 } from 'react-native'
 import { Icon, Text, TouchableRipple, useTheme } from 'react-native-paper'
@@ -46,6 +47,9 @@ interface LyricSourcePickerProps {
 	onToggleTranslation: () => void
 	onEditLyrics: () => void
 	onOpenOffsetMenu: () => void
+	bottomOffset?: number
+	rightOffset?: number
+	compact?: boolean
 }
 
 export const LyricSourcePicker = memo(function LyricSourcePicker({
@@ -56,10 +60,14 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 	onToggleTranslation,
 	onEditLyrics,
 	onOpenOffsetMenu,
+	bottomOffset: customBottomOffset,
+	rightOffset = 12,
+	compact = false,
 }: LyricSourcePickerProps) {
 	const { colors } = useTheme()
 	const isDark = useColorScheme() === 'dark'
 	const insets = useSafeAreaInsets()
+	const { width: windowWidth, height: windowHeight } = useWindowDimensions()
 
 	const [expanded, setExpanded] = useState(false)
 	const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
@@ -125,7 +133,17 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 		})
 	}, [track.title, track.uniqueKey])
 
-	const bottomOffset = Math.max(insets.bottom, 12) + 4
+	const bottomOffset = customBottomOffset ?? Math.max(insets.bottom, 12) + 4
+	const fabSize = compact ? 42 : 46
+	const fabIconSize = compact ? 19 : 21
+	const popoverWidth = Math.min(
+		312,
+		Math.max(240, windowWidth - rightOffset * 2),
+	)
+	const maxListHeight = Math.min(
+		248,
+		Math.max(116, windowHeight - insets.top - bottomOffset - 224),
+	)
 	const surfaceBg = isDark
 		? 'rgba(26, 26, 30, 0.94)'
 		: 'rgba(255, 255, 255, 0.96)'
@@ -156,7 +174,7 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 
 	return (
 		<View
-			style={StyleSheet.absoluteFill}
+			style={[StyleSheet.absoluteFill, { zIndex: 30 }]}
 			pointerEvents='box-none'
 		>
 			{expanded && (
@@ -174,7 +192,9 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 					style={[
 						styles.popover,
 						{
-							bottom: bottomOffset + 56,
+							right: rightOffset,
+							width: popoverWidth,
+							bottom: bottomOffset + fabSize + 10,
 							backgroundColor: surfaceBg,
 							borderColor: surfaceBorder,
 						},
@@ -271,7 +291,7 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 
 					{/* 候选歌词列表 */}
 					<ScrollView
-						style={styles.list}
+						style={[styles.list, { maxHeight: maxListHeight }]}
 						contentContainerStyle={styles.listContent}
 						showsVerticalScrollIndicator={false}
 						nestedScrollEnabled
@@ -456,7 +476,11 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 				style={({ pressed }) => [
 					styles.fab,
 					{
+						right: rightOffset,
 						bottom: bottomOffset,
+						width: fabSize,
+						height: fabSize,
+						borderRadius: fabSize / 2,
 						backgroundColor: fabBg,
 						borderColor: fabBorder,
 						opacity: pressed ? 0.78 : 1,
@@ -469,7 +493,7 @@ export const LyricSourcePicker = memo(function LyricSourcePicker({
 			>
 				<Icon
 					source={expanded ? 'close' : 'script-text-outline'}
-					size={21}
+					size={fabIconSize}
 					color={fabIconColor}
 				/>
 			</Pressable>

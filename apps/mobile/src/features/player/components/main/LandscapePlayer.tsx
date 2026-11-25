@@ -606,10 +606,16 @@ export function LandscapePlayer({
 
 											<GestureDetector gesture={bottomCommentsGesture}>
 												<View>
-													<View style={styles.gap}>
+													<View
+														style={[
+															styles.gap,
+															height < 500 && styles.gapCompact,
+														]}
+													>
 														<PlayerSlider onDragStateChange={setIsScrubbing} />
 													</View>
 													<PlayerControls
+														compact={height < 500}
 														onOpenQueue={() => {
 															void usePlayerQueueSheetStore.getState().open()
 														}}
@@ -713,6 +719,10 @@ const styles = StyleSheet.create({
 	gap: {
 		marginTop: 14,
 		marginBottom: 16,
+	},
+	gapCompact: {
+		marginTop: 4,
+		marginBottom: 6,
 	},
 	bottomPillArea: {
 		alignItems: 'center',

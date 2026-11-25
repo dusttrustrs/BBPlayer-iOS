@@ -332,8 +332,10 @@ function PodcastSeekButton({
 
 export function SecondaryPlaybackControls({
 	children,
+	compact = false,
 }: {
 	children: React.ReactNode
+	compact?: boolean
 }) {
 	const { width, height } = useWindowDimensions()
 	const isTabletPortrait = width >= 600 && height > width
@@ -341,6 +343,7 @@ export function SecondaryPlaybackControls({
 		<View
 			style={[
 				styles.secondaryControlsContainer,
+				compact && { marginTop: 2 },
 				isTabletPortrait && { gap: 48 },
 			]}
 		>

@@ -1,5 +1,5 @@
 import { useIsPlaying, useSpectrumVisualizerEnabled } from '@bbplayer/orpheus'
-import { Computed } from '@legendapp/state/react'
+import { Computed, useValue } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -74,6 +74,7 @@ export function TrackInfo({
 
 	const currentTrack = useCurrentTrack()
 	const isPlaying = useIsPlaying()
+	const isPodcast = useValue(playbackContextStore$.context.mode) === 'podcast'
 	const [isTitleExpanded, setIsTitleExpanded] = useState(false)
 	const [thumbUpBurstSignal, setThumbUpBurstSignal] = useState(0)
 	const activeSkin = useActiveSkin()
@@ -84,6 +85,7 @@ export function TrackInfo({
 			(state.settings as { rotatePlayerCover?: boolean }).rotatePlayerCover ??
 			false,
 	)
+	const allowCoverRotation = rotatePlayerCover && (!isPodcast || forceCircle)
 
 	const rotation = useSharedValue(0)
 
@@ -102,12 +104,12 @@ export function TrackInfo({
 	}, [currentTrack?.uniqueKey, rotation])
 
 	useEffect(() => {
-		const shouldAnimate = rotatePlayerCover && isPlaying
+		const shouldAnimate = allowCoverRotation && isPlaying
 		frameCallback.setActive(shouldAnimate)
-		if (!rotatePlayerCover) {
+		if (!allowCoverRotation) {
 			rotation.set(0)
 		}
-	}, [rotatePlayerCover, isPlaying, frameCallback, rotation])
+	}, [allowCoverRotation, isPlaying, frameCallback, rotation])
 
 	const { data: isThumbUp, isPending: isThumbUpPending } = useGetVideoIsThumbUp(
 		currentTrack?.source === 'bilibili'
@@ -257,7 +259,7 @@ export function TrackInfo({
 										<Animated.View
 											style={[
 												{ width: coverSize, height: coverSize },
-												!podcast && animatedRotateStyle,
+												animatedRotateStyle,
 											]}
 										>
 											<SquircleView

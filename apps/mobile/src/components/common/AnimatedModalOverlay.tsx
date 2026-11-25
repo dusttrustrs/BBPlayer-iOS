@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ViewStyle } from 'react-native'
-import { Pressable, StyleSheet } from 'react-native'
+import { Pressable, StyleSheet, useWindowDimensions } from 'react-native'
 import SquircleView from 'react-native-fast-squircle'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import { useTheme } from 'react-native-paper'
@@ -26,6 +26,8 @@ export default function AnimatedModalOverlay({
 	contentStyle,
 }: Props) {
 	const insets = useSafeAreaInsets()
+	const { width: windowWidth, height: windowHeight } = useWindowDimensions()
+	const isLandscape = windowWidth > windowHeight
 	const { height } = useReanimatedKeyboardAnimation()
 	const theme = useTheme()
 	const [showContent, setShowContent] = useState(false)
@@ -37,6 +39,15 @@ export default function AnimatedModalOverlay({
 
 	if (!visible) return null
 
+	const horizontalMargin = Math.max(insets.left, insets.right, 26)
+	const maxModalHeight = Math.max(
+		220,
+		windowHeight - insets.top - insets.bottom - (isLandscape ? 20 : 48),
+	)
+	const maxModalWidth = isLandscape
+		? Math.min(windowWidth - horizontalMargin * 2, 600)
+		: undefined
+
 	return (
 		<AnimatedPressable
 			style={[styles.wrapper, wrapperAvoiding]}
@@ -46,7 +57,11 @@ export default function AnimatedModalOverlay({
 				style={[
 					styles.content,
 					{
-						marginHorizontal: Math.max(insets.left, insets.right, 26),
+						marginHorizontal: horizontalMargin,
+						maxHeight: maxModalHeight,
+						maxWidth: maxModalWidth,
+						alignSelf: isLandscape ? 'center' : 'stretch',
+						width: isLandscape ? maxModalWidth : undefined,
 						opacity: showContent ? 1 : 0,
 					},
 				]}
@@ -60,7 +75,10 @@ export default function AnimatedModalOverlay({
 				<SquircleView
 					style={[
 						styles.contentInner,
-						{ backgroundColor: theme.colors.surface },
+						{
+							backgroundColor: theme.colors.surface,
+							maxHeight: maxModalHeight,
+						},
 						contentStyle,
 					]}
 					cornerSmoothing={0.6}
