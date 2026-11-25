@@ -1,82 +1,16 @@
-import { Icon as ExpoIcon } from '@expo/ui'
 import { memo } from 'react'
 import { StyleSheet, useWindowDimensions, View } from 'react-native'
-import { Touchable } from 'react-native-gesture-handler'
-import { Icon, useTheme } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { MenuView } from '@/components/common/FunctionalMenu'
 import { MainPlaybackControls } from '@/features/player/components/controls/PlayerControlContent'
 import { PlayerSlider } from '@/features/player/components/main/PlayerSlider'
-import { type MenuBuilder, useMenuActions } from '@/hooks/ui/useMenuActions'
 
-const ALPHABETICAL_ICON = ExpoIcon.select({
-	ios: 'abc',
-	android: import('@expo/material-symbols/abc.xml'),
-})
+export const LYRICS_CONTROLS_OVERLAY_HEIGHT = 200
 
-const TRANSLATE_ICON = ExpoIcon.select({
-	ios: 'translate',
-	android: import('@expo/material-symbols/translate.xml'),
-})
-
-const EDIT_ICON = ExpoIcon.select({
-	ios: 'pencil',
-	android: import('@expo/material-symbols/edit.xml'),
-})
-
-const OFFSET_ICON = ExpoIcon.select({
-	ios: 'arrow.up.arrow.down.circle',
-	android: import('@expo/material-symbols/swap_vertical_circle.xml'),
-})
-
-export const LYRICS_CONTROLS_OVERLAY_HEIGHT = 240
-
-interface LyricsControlOverlayProps {
-	offsetMenuVisible: boolean
-	showTranslationToggle: boolean
-	translationType: 'translation' | 'romaji'
-	onToggleTranslation: () => void
-	onEditLyrics: () => void
-	onOpenOffsetMenu: () => void
-}
-
-export const LyricsControlOverlay = memo(function LyricsControlOverlay({
-	offsetMenuVisible,
-	showTranslationToggle,
-	translationType,
-	onToggleTranslation,
-	onEditLyrics,
-	onOpenOffsetMenu,
-}: LyricsControlOverlayProps) {
-	const { colors } = useTheme()
+export const LyricsControlOverlay = memo(function LyricsControlOverlay() {
 	const insets = useSafeAreaInsets()
 	const { width, height } = useWindowDimensions()
 	const isLandscape = width > height
-
-	const menuActions = useMenuActions(addLyricsMenuItems)
-
-	function addLyricsMenuItems(menu: MenuBuilder) {
-		if (showTranslationToggle) {
-			const isTranslation = translationType === 'translation'
-			menu.add({
-				title: isTranslation ? '切换罗马音' : '切换翻译',
-				image: isTranslation ? ALPHABETICAL_ICON : TRANSLATE_ICON,
-				onPress: onToggleTranslation,
-			})
-		}
-
-		menu.add({
-			title: '编辑歌词',
-			image: EDIT_ICON,
-			onPress: onEditLyrics,
-		})
-		menu.add({
-			title: '时间轴偏移',
-			image: OFFSET_ICON,
-			onPress: onOpenOffsetMenu,
-		})
-	}
 
 	// 横屏状态下彻底去除歌词界面下方的进度条与播放控制按钮
 	if (isLandscape) {
@@ -85,7 +19,7 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 
 	const isTabletPortrait = width >= 600 && !isLandscape
 	const paddingBottom = Math.max(insets.bottom + 14, 24)
-	const overlayHeight = 180 + paddingBottom
+	const overlayHeight = 148 + paddingBottom
 
 	return (
 		<View
@@ -107,24 +41,6 @@ export const LyricsControlOverlay = memo(function LyricsControlOverlay({
 					},
 				]}
 			>
-				{/* 功能按钮，位于 slider 上方右侧 */}
-				<View style={styles.actionMenuRow}>
-					<MenuView {...menuActions}>
-						<Touchable
-							androidRipple={{}}
-							style={styles.actionMenuButton}
-							disabled={offsetMenuVisible}
-						>
-							<Icon
-								source='dots-vertical'
-								size={20}
-								color={
-									offsetMenuVisible ? colors.onSurfaceDisabled : colors.primary
-								}
-							/>
-						</Touchable>
-					</MenuView>
-				</View>
 				<PlayerSlider />
 				<View style={styles.playbackButtonsWrapper}>
 					<MainPlaybackControls size='compact' />
@@ -146,16 +62,6 @@ const styles = StyleSheet.create({
 	playerControls: {
 		width: '100%',
 		paddingTop: 4,
-	},
-	actionMenuRow: {
-		flexDirection: 'row',
-		justifyContent: 'flex-end',
-		paddingHorizontal: 16,
-		marginBottom: 0,
-	},
-	actionMenuButton: {
-		borderRadius: 99999,
-		padding: 6,
 	},
 	playbackButtonsWrapper: {
 		marginTop: 0,

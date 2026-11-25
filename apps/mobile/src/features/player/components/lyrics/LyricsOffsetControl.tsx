@@ -1,11 +1,12 @@
-import { memo, useCallback, useEffect } from 'react'
-import { Modal, Pressable, StyleSheet, View } from 'react-native'
-import { Divider, Icon, Text, useTheme } from 'react-native-paper'
+import { memo, useCallback, useEffect, useState } from 'react'
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
+import { Divider, Icon, Portal, Text, useTheme } from 'react-native-paper'
 import Animated, {
 	useAnimatedStyle,
 	useSharedValue,
 	withTiming,
 } from 'react-native-reanimated'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { scheduleOnRN } from 'react-native-worklets'
 
 export interface LyricsOffsetControlProps {
@@ -22,15 +23,29 @@ export const LyricsOffsetControl = memo(function LyricsOffsetControl({
 	onClose,
 }: LyricsOffsetControlProps) {
 	const colors = useTheme().colors
+	const insets = useSafeAreaInsets()
+	const { height: windowHeight } = useWindowDimensions()
+	const isCompactHeight = windowHeight < 500
+
+	const [mounted, setMounted] = useState(visible)
 	const translateX = useSharedValue(200)
 	const isAnimatingOut = useSharedValue(false)
 
 	useEffect(() => {
 		if (visible) {
+			setMounted(true)
 			isAnimatingOut.set(false)
+			translateX.set(200)
 			translateX.set(withTiming(0, { duration: 250 }))
+		} else {
+			setMounted(false)
 		}
 	}, [visible, translateX, isAnimatingOut])
+
+	const finishClose = useCallback(() => {
+		setMounted(false)
+		onClose()
+	}, [onClose])
 
 	const handleDismiss = useCallback(() => {
 		if (isAnimatingOut.value) return
@@ -38,25 +53,29 @@ export const LyricsOffsetControl = memo(function LyricsOffsetControl({
 		translateX.set(
 			withTiming(250, { duration: 200 }, (finished) => {
 				if (finished) {
-					scheduleOnRN(onClose)
+					scheduleOnRN(finishClose)
 				}
 			}),
 		)
-	}, [isAnimatingOut, translateX, onClose])
+	}, [isAnimatingOut, translateX, finishClose])
 
 	const panelStyle = useAnimatedStyle(() => ({
 		transform: [{ translateX: translateX.value }],
 	}))
 
+	if (!mounted && !visible) {
+		return null
+	}
+
+	const buttonPadding = isCompactHeight ? 10 : 14
+	const iconSize = isCompactHeight ? 24 : 28
+
 	return (
-		<Modal
-			transparent
-			visible={visible}
-			onRequestClose={handleDismiss}
-			animationType='none'
-			statusBarTranslucent
-		>
-			<View style={styles.modalRoot}>
+		<Portal>
+			<View
+				style={styles.modalRoot}
+				pointerEvents='box-none'
+			>
 				<Pressable
 					style={StyleSheet.absoluteFill}
 					onPress={handleDismiss}
@@ -64,18 +83,23 @@ export const LyricsOffsetControl = memo(function LyricsOffsetControl({
 				<Animated.View
 					style={[
 						styles.panel,
-						{ backgroundColor: colors.elevation.level2 },
+						{
+							backgroundColor: colors.elevation.level2,
+							marginRight: Math.max(insets.right, 16),
+							gap: isCompactHeight ? 4 : 12,
+							paddingVertical: isCompactHeight ? 6 : 8,
+						},
 						panelStyle,
 					]}
 				>
 					<Pressable
 						android_ripple={{}}
-						style={styles.offsetControlButton}
+						style={[styles.offsetControlButton, { padding: buttonPadding }]}
 						onPress={() => onChangeOffset(0.5)}
 					>
 						<Icon
 							source='arrow-up'
-							size={28}
+							size={iconSize}
 							color={colors.onSurface}
 						/>
 					</Pressable>
@@ -87,50 +111,53 @@ export const LyricsOffsetControl = memo(function LyricsOffsetControl({
 					</Text>
 					<Pressable
 						android_ripple={{}}
-						style={styles.offsetControlButton}
+						style={[styles.offsetControlButton, { padding: buttonPadding }]}
 						onPress={() => onChangeOffset(-0.5)}
 					>
 						<Icon
 							source='arrow-down'
-							size={28}
+							size={iconSize}
 							color={colors.onSurface}
 						/>
 					</Pressable>
 					<Divider />
 					<Pressable
 						android_ripple={{}}
-						style={styles.offsetControlButton}
+						style={[styles.offsetControlButton, { padding: buttonPadding }]}
 						onPress={handleDismiss}
 					>
 						<Icon
 							source='check'
-							size={28}
+							size={iconSize}
 							color={colors.onSurface}
 						/>
 					</Pressable>
 				</Animated.View>
 			</View>
-		</Modal>
+		</Portal>
 	)
 })
 
 const styles = StyleSheet.create({
 	modalRoot: {
-		flex: 1,
+		...StyleSheet.absoluteFill,
+		zIndex: 1200,
 		justifyContent: 'center',
 		alignItems: 'flex-end',
 	},
 	panel: {
-		gap: 12,
 		borderRadius: 20,
 		elevation: 10,
 		paddingHorizontal: 4,
-		paddingVertical: 8,
-		marginRight: 16,
+		shadowColor: '#000',
+		shadowOffset: { width: 0, height: 4 },
+		shadowOpacity: 0.25,
+		shadowRadius: 10,
 	},
 	offsetControlButton: {
 		borderRadius: 99999,
-		padding: 14,
+		alignItems: 'center',
+		justifyContent: 'center',
 	},
 	offsetControlText: {
 		textAlign: 'center',

@@ -52,7 +52,7 @@ const Lyrics = memo(function Lyrics({
 	const isTabletPortrait = dimensions.width >= 600 && !isLandscape && !splitMode
 	const useSimpleFade = isLandscape || splitMode
 	const portraitControlsPaddingBottom = Math.max(insets.bottom + 14, 24)
-	const portraitBottomClearance = portraitControlsPaddingBottom + 150
+	const portraitBottomClearance = portraitControlsPaddingBottom + 136
 	const portraitBottomFadeHeight = 28
 	const portraitBottomScrollPadding =
 		portraitBottomClearance + portraitBottomFadeHeight + 80
@@ -232,7 +232,8 @@ const Lyrics = memo(function Lyrics({
 
 	if (!track) return null
 
-	const sourcePickerNode = splitMode ? (
+	const showSourcePicker = splitMode || !isLandscape
+	const sourcePickerNode = showSourcePicker ? (
 		<LyricSourcePicker
 			track={track}
 			currentLyrics={lyrics}
@@ -245,6 +246,18 @@ const Lyrics = memo(function Lyrics({
 			}
 			onEditLyrics={handleEditLyrics}
 			onOpenOffsetMenu={handleOpenOffsetMenu}
+			bottomOffset={splitMode ? undefined : portraitControlsPaddingBottom + 140}
+			rightOffset={
+				splitMode
+					? 12
+					: isTabletPortrait
+						? Math.max(
+								(dimensions.width - Math.min(dimensions.width - 96, 620)) / 2,
+								24,
+							)
+						: 16
+			}
+			compact={!splitMode && !isTabletPortrait}
 		/>
 	) : null
 
@@ -454,20 +467,7 @@ const Lyrics = memo(function Lyrics({
 			</View>
 
 			{/* 播放器控件覆盖层（分栏模式由左侧控制区接管，不再重复渲染） */}
-			{!splitMode && (
-				<LyricsControlOverlay
-					offsetMenuVisible={offsetMenuVisible}
-					showTranslationToggle={!!lyrics?.tlyric && !!lyrics?.romalrc}
-					translationType={preferredLyricType}
-					onToggleTranslation={() =>
-						setPreferredLyricType((prev) =>
-							prev === 'translation' ? 'romaji' : 'translation',
-						)
-					}
-					onEditLyrics={handleEditLyrics}
-					onOpenOffsetMenu={handleOpenOffsetMenu}
-				/>
-			)}
+			{!splitMode && <LyricsControlOverlay />}
 
 			{/* 分栏模式右下角圆形歌词源切换按钮与浮层 */}
 			{sourcePickerNode}

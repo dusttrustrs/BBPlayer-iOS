@@ -19,7 +19,13 @@ import {
 	SecondaryPlaybackControls,
 } from './PlayerControlContent'
 
-export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
+export function MusicControls({
+	onOpenQueue,
+	compact = false,
+}: {
+	onOpenQueue: () => void
+	compact?: boolean
+}) {
 	const { colors } = useTheme()
 	const { width, height } = useWindowDimensions()
 	const secondaryIconSize = width >= 600 && height > width ? 26 : 24
@@ -29,10 +35,10 @@ export function MusicControls({ onOpenQueue }: { onOpenQueue: () => void }) {
 
 	return (
 		<View>
-			<View style={{ marginTop: 24 }}>
-				<MainPlaybackControls />
+			<View style={{ marginTop: compact ? 6 : 24 }}>
+				<MainPlaybackControls size={compact ? 'compact' : 'normal'} />
 			</View>
-			<SecondaryPlaybackControls>
+			<SecondaryPlaybackControls compact={compact}>
 				<IconButton
 					icon={shuffleMode ? 'shuffle-variant' : 'shuffle-disabled'}
 					size={secondaryIconSize}

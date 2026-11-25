@@ -14,7 +14,7 @@ import {
 	SecondaryPlaybackControls,
 } from './PlayerControlContent'
 
-export function PodcastControls() {
+export function PodcastControls({ compact = false }: { compact?: boolean }) {
 	const { colors } = useTheme()
 	const { width, height } = useWindowDimensions()
 	const secondaryIconSize = width >= 600 && height > width ? 26 : 24
@@ -59,10 +59,13 @@ export function PodcastControls() {
 	]
 	return (
 		<View>
-			<View style={{ marginTop: 24 }}>
-				<MainPlaybackControls podcast />
+			<View style={{ marginTop: compact ? 6 : 24 }}>
+				<MainPlaybackControls
+					podcast
+					size={compact ? 'compact' : 'normal'}
+				/>
 			</View>
-			<SecondaryPlaybackControls>
+			<SecondaryPlaybackControls compact={compact}>
 				{actions.map((action) => (
 					<IconButton
 						key={action.icon}

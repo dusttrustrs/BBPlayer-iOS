@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native'
 import { memo, useCallback, useMemo, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Dialog, Text, TouchableRipple } from 'react-native-paper'
 import { Searchbar as SearchBar } from 'react-native-paper'
 
@@ -75,6 +75,11 @@ const ManualSearchLyricsModal = ({
 }) => {
 	const [query, setQuery] = useState(initialQuery)
 	const close = useModalStore((state) => state.close)
+	const { height: windowHeight } = useWindowDimensions()
+	const isCompactHeight = windowHeight < 500
+	const scrollAreaHeight = isCompactHeight
+		? Math.min(220, Math.max(96, windowHeight - 220))
+		: 300
 
 	const {
 		results: searchResult,
@@ -149,9 +154,16 @@ const ManualSearchLyricsModal = ({
 
 	return (
 		<>
-			<Dialog.Title style={styles.dialogTitle}>
+			<Dialog.Title
+				style={[
+					styles.dialogTitle,
+					isCompactHeight && styles.compactDialogTitle,
+				]}
+			>
 				<View style={styles.titleContainer}>
-					<Text variant='headlineSmall'>手动搜索歌词</Text>
+					<Text variant={isCompactHeight ? 'titleLarge' : 'headlineSmall'}>
+						手动搜索歌词
+					</Text>
 					{isSearching && (
 						<ActivityIndicator
 							size='small'
@@ -160,18 +172,26 @@ const ManualSearchLyricsModal = ({
 					)}
 				</View>
 			</Dialog.Title>
-			<Dialog.Content>
+			<Dialog.Content
+				style={isCompactHeight ? styles.compactSearchContent : undefined}
+			>
 				<SearchBar
 					value={query}
 					onChangeText={setQuery}
 					placeholder='输入歌曲名'
 					onSubmitEditing={() => searchIt(query)}
+					style={isCompactHeight ? styles.compactSearchBar : undefined}
+					inputStyle={isCompactHeight ? styles.compactSearchInput : undefined}
 				/>
 			</Dialog.Content>
-			<Dialog.ScrollArea style={styles.scrollArea}>
+			<Dialog.ScrollArea
+				style={[styles.scrollArea, { height: scrollAreaHeight }]}
+			>
 				{renderContent()}
 			</Dialog.ScrollArea>
-			<Dialog.Actions>
+			<Dialog.Actions
+				style={isCompactHeight ? styles.compactActions : undefined}
+			>
 				<Button
 					onPress={() => close('ManualSearchLyrics')}
 					disabled={isFetchingLyrics}
@@ -208,6 +228,23 @@ const styles = StyleSheet.create({
 	},
 	dialogTitle: {
 		alignItems: 'center',
+	},
+	compactDialogTitle: {
+		marginTop: 8,
+		marginBottom: 8,
+	},
+	compactSearchContent: {
+		paddingBottom: 10,
+	},
+	compactSearchBar: {
+		height: 44,
+	},
+	compactSearchInput: {
+		minHeight: 44,
+	},
+	compactActions: {
+		paddingBottom: 10,
+		paddingTop: 4,
 	},
 	titleContainer: {
 		flexDirection: 'row',

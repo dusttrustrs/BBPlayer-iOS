@@ -374,7 +374,7 @@ export function PlayerSlider({
 
 	return (
 		<View style={styles.root}>
-			{podcast && showChapterTitle && (
+			{podcast && showChapterTitle && chapters.length > 0 && (
 				<AnimateableText
 					numberOfLines={1}
 					animatedProps={chapterPreviewProps}

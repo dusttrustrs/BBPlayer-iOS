@@ -1,7 +1,7 @@
 import { verify } from '@bbplayer/splash'
 import * as WebBrowser from 'expo-web-browser'
 import { useState } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { Dialog, TextInput, useTheme } from 'react-native-paper'
 import { TabBar, TabView } from 'react-native-tab-view'
 
@@ -24,6 +24,11 @@ export default function EditLyricsModal({
 }) {
 	const close = useModalStore((state) => state.close)
 	const theme = useTheme()
+	const { height: windowHeight } = useWindowDimensions()
+	const isCompactHeight = windowHeight < 500
+	const contentHeight = isCompactHeight
+		? Math.min(240, Math.max(132, windowHeight - 172))
+		: 350
 
 	const [lrc, setLrc] = useState(lyrics.lrc ?? '')
 	const [tlyric, setTlyric] = useState(lyrics.tlyric ?? '')
@@ -185,26 +190,30 @@ export default function EditLyricsModal({
 
 	return (
 		<>
-			<Dialog.Title>编辑歌词</Dialog.Title>
-			<Dialog.Content style={styles.content}>
-				<View style={styles.header}>
-					<Text style={{ color: theme.colors.onSurfaceVariant }}>
-						我们的歌词遵循 SPL(LRC) 规范，
-					</Text>
-					<Text
-						style={{
-							color: theme.colors.primary,
-							textDecorationLine: 'underline',
-						}}
-						onPress={() =>
-							WebBrowser.openBrowserAsync(
-								'https://moriafly.com/standards/spl.html',
-							)
-						}
-					>
-						点击查看规范详情
-					</Text>
-				</View>
+			<Dialog.Title style={isCompactHeight ? styles.compactTitle : undefined}>
+				编辑歌词
+			</Dialog.Title>
+			<Dialog.Content style={[styles.content, { height: contentHeight }]}>
+				{!isCompactHeight && (
+					<View style={styles.header}>
+						<Text style={{ color: theme.colors.onSurfaceVariant }}>
+							我们的歌词遵循 SPL(LRC) 规范，
+						</Text>
+						<Text
+							style={{
+								color: theme.colors.primary,
+								textDecorationLine: 'underline',
+							}}
+							onPress={() =>
+								WebBrowser.openBrowserAsync(
+									'https://moriafly.com/standards/spl.html',
+								)
+							}
+						>
+							点击查看规范详情
+						</Text>
+					</View>
+				)}
 				<TabView
 					navigationState={{ index, routes }}
 					renderTabBar={(props) => (
@@ -225,7 +234,9 @@ export default function EditLyricsModal({
 					style={styles.tabView}
 				/>
 			</Dialog.Content>
-			<Dialog.Actions>
+			<Dialog.Actions
+				style={isCompactHeight ? styles.compactActions : undefined}
+			>
 				<Button onPress={clearLyrics}>清除歌词</Button>
 				<Button onPress={() => close('EditLyrics')}>取消</Button>
 				<Button onPress={handleConfirm}>确定</Button>
@@ -235,6 +246,15 @@ export default function EditLyricsModal({
 }
 
 const styles = StyleSheet.create({
+	compactTitle: {
+		marginTop: 8,
+		marginBottom: 6,
+		fontSize: 18,
+	},
+	compactActions: {
+		paddingBottom: 10,
+		paddingTop: 4,
+	},
 	content: {
 		paddingHorizontal: 0,
 		paddingBottom: 0,
