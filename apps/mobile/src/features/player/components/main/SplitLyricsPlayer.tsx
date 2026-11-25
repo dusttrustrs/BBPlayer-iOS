@@ -1,14 +1,8 @@
-import {
-	Orpheus,
-	PlaybackState,
-	RepeatMode,
-	useIsPlaying,
-	usePlaybackState,
-} from '@bbplayer/orpheus'
-import { Computed, Show } from '@legendapp/state/react'
+import { RepeatMode } from '@bbplayer/orpheus'
+import { Computed, Show, useValue } from '@legendapp/state/react'
 import type { ImageRef } from 'expo-image'
 import { useRouter } from 'expo-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
 	Pressable,
 	ScrollView,
@@ -26,9 +20,9 @@ import Animated, {
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import ActivityIndicator from '@/components/common/ActivityIndicator'
 import { PlayerCommentsCard } from '@/features/player/components/comments/PlayerCommentsCard'
 import { AppVolumeSlider } from '@/features/player/components/controls/AppVolumeSlider'
+import { MainPlaybackControls } from '@/features/player/components/controls/PlayerControlContent'
 import Lyrics from '@/features/player/components/lyrics/PlayerLyrics'
 import { PodcastSubtitles } from '@/features/player/components/lyrics/PodcastSubtitles'
 import SkinThumbUpBurst from '@/features/player/components/visuals/SkinThumbUpBurst'
@@ -44,7 +38,6 @@ import { playbackContextStore$ } from '@/hooks/stores/playbackContextStore'
 import { usePlayerCommentsStore } from '@/hooks/stores/usePlayerCommentsStore'
 import { usePlayerQueueSheetStore } from '@/hooks/stores/usePlayerQueueSheetStore'
 import useActiveSkin from '@/hooks/theme/useActiveSkin'
-import { seekWithinTrack } from '@/lib/player/seek'
 import { analyticsService } from '@/lib/services/analyticsService'
 import { toastAndLogError } from '@/utils/error-handling'
 import * as Haptics from '@/utils/haptics'
@@ -67,18 +60,13 @@ export function SplitLyricsPlayer({
 	const { width, height } = useWindowDimensions()
 
 	const currentTrack = useCurrentTrack()
-	const isPlaying = useIsPlaying()
-	const playbackState = usePlaybackState()
+	const isPodcast = useValue(playbackContextStore$.context.mode) === 'podcast'
 	const { shuffle: shuffleMode, repeat: repeatMode } = usePlaybackOptions()
 	const isCommentsOpen = usePlayerCommentsStore((state) => state.isOpen)
 	const activeSkin = useActiveSkin()
 
 	const [isTitleExpanded, setIsTitleExpanded] = useState(false)
 	const [thumbUpBurstSignal, setThumbUpBurstSignal] = useState(0)
-	const [debouncedIsPlaying, setDebouncedIsPlaying] = useState(isPlaying)
-	const [debouncedBuffering, setDebouncedBuffering] = useState(false)
-	const playingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-	const bufferingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const isBilibiliVideo = currentTrack?.source === 'bilibili'
 	const bvid = isBilibiliVideo ? currentTrack.bilibiliMetadata.bvid : undefined
@@ -90,47 +78,6 @@ export function SplitLyricsPlayer({
 	useEffect(() => {
 		setIsTitleExpanded(false)
 	}, [currentTrack?.uniqueKey])
-
-	useEffect(() => {
-		if (playbackState === PlaybackState.BUFFERING) {
-			if (bufferingTimeoutRef.current) {
-				clearTimeout(bufferingTimeoutRef.current)
-			}
-			bufferingTimeoutRef.current = setTimeout(() => {
-				setDebouncedBuffering(true)
-			}, 300)
-		} else {
-			if (bufferingTimeoutRef.current) {
-				clearTimeout(bufferingTimeoutRef.current)
-				bufferingTimeoutRef.current = null
-			}
-			setDebouncedBuffering(false)
-		}
-		return () => {
-			if (bufferingTimeoutRef.current) {
-				clearTimeout(bufferingTimeoutRef.current)
-			}
-		}
-	}, [playbackState])
-
-	useEffect(() => {
-		if (playingTimeoutRef.current) {
-			clearTimeout(playingTimeoutRef.current)
-			playingTimeoutRef.current = null
-		}
-		if (isPlaying) {
-			setDebouncedIsPlaying(true)
-		} else {
-			playingTimeoutRef.current = setTimeout(() => {
-				setDebouncedIsPlaying(false)
-			}, 200)
-		}
-		return () => {
-			if (playingTimeoutRef.current) {
-				clearTimeout(playingTimeoutRef.current)
-			}
-		}
-	}, [isPlaying])
 
 	const entrance = useSharedValue(0)
 	useEffect(() => {
@@ -204,57 +151,6 @@ export function SplitLyricsPlayer({
 		}
 	}, [shuffleMode, repeatMode])
 
-	const handlePlayPause = useCallback(async () => {
-		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-		const nextPlaying = !debouncedIsPlaying
-		setDebouncedIsPlaying(nextPlaying)
-		try {
-			if (debouncedIsPlaying) {
-				await Orpheus.pause()
-				void analyticsService.logPlayerAction('pause')
-			} else {
-				await Orpheus.play()
-				void analyticsService.logPlayerAction('play')
-			}
-		} catch (e) {
-			toastAndLogError('播放操作失败', e, 'SplitPlayer.Controls')
-		}
-	}, [debouncedIsPlaying])
-
-	const handlePrev = useCallback(() => {
-		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-		if (
-			playbackContextStore$.context.mode.peek() === 'podcast' &&
-			currentTrack
-		) {
-			void seekWithinTrack(currentTrack.uniqueKey, -15, true).catch(
-				(error: unknown) => {
-					toastAndLogError('快退失败', error, 'SplitPlayer.Controls')
-				},
-			)
-			return
-		}
-		void Orpheus.skipToPrevious()
-		void analyticsService.logPlayerAction('skip_prev')
-	}, [currentTrack])
-
-	const handleNext = useCallback(() => {
-		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
-		if (
-			playbackContextStore$.context.mode.peek() === 'podcast' &&
-			currentTrack
-		) {
-			void seekWithinTrack(currentTrack.uniqueKey, 15, true).catch(
-				(error: unknown) => {
-					toastAndLogError('快进失败', error, 'SplitPlayer.Controls')
-				},
-			)
-			return
-		}
-		void Orpheus.skipToNext()
-		void analyticsService.logPlayerAction('skip_next')
-	}, [currentTrack])
-
 	const handleOpenQueue = useCallback(() => {
 		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
 		void usePlayerQueueSheetStore.getState().open()
@@ -292,7 +188,7 @@ export function SplitLyricsPlayer({
 	const leftContentWidth = Math.max(140, leftColumnWidth - leftInnerPadding * 2)
 
 	// 预留给下方控制区域的高度（信息行 + 进度条 + 5键控制行 + 音量条 + 间距）
-	const reservedBottomHeight = isCompactWidth ? 236 : 272
+	const reservedBottomHeight = isCompactWidth ? 244 : 288
 	const maxCoverByHeight = Math.max(110, availHeight - reservedBottomHeight)
 	const maxCoverByWidth = leftContentWidth * (isCompactWidth ? 0.84 : 0.78)
 	const coverSize = Math.floor(
@@ -324,11 +220,12 @@ export function SplitLyricsPlayer({
 		? 'rgba(255, 255, 255, 0.72)'
 		: colors.onSurfaceVariant
 
-	const mainPlayIconSize = isCompactWidth ? 30 : 44
-	const skipIconSize = isCompactWidth ? 22 : 30
+	const isWideControls = !isCompactWidth && leftContentWidth >= 310
+	const mainSkipSize = isCompactWidth ? 26 : isWideControls ? 40 : 32
+	const mainPlaySize = isCompactWidth ? 50 : isWideControls ? 80 : 66
+	const mainControlsGap = isCompactWidth ? 6 : isWideControls ? 18 : 10
 	const sideIconSize = isCompactWidth ? 18 : 22
-	const transportBtnSize = isCompactWidth ? 30 : 40
-	const playPauseBtnSize = isCompactWidth ? 40 : 56
+	const transportBtnSize = isCompactWidth ? 30 : 38
 
 	const leftColumnContent = (
 		<View
@@ -492,81 +389,13 @@ export function SplitLyricsPlayer({
 						/>
 					</Pressable>
 
-					<Pressable
-						onPress={handlePrev}
-						hitSlop={8}
-						style={({ pressed }) => [
-							styles.transportBtn,
-							{
-								width: transportBtnSize,
-								height: transportBtnSize,
-								borderRadius: transportBtnSize / 2,
-								opacity: pressed ? 0.6 : 1,
-							},
-						]}
-						accessibilityRole='button'
-						accessibilityLabel='上一首'
-						testID='split-player-prev'
-					>
-						<Icon
-							source='skip-previous'
-							size={skipIconSize}
-							color={primaryControlColor}
-						/>
-					</Pressable>
-
-					<Pressable
-						onPress={() => void handlePlayPause()}
-						hitSlop={8}
-						style={({ pressed }) => [
-							styles.playPauseBtn,
-							{
-								width: playPauseBtnSize,
-								height: playPauseBtnSize,
-								opacity: pressed ? 0.7 : 1,
-								transform: [{ scale: pressed ? 0.94 : 1 }],
-							},
-						]}
-						accessibilityRole='button'
-						accessibilityLabel={debouncedIsPlaying ? '暂停' : '播放'}
-						testID='split-player-play-pause'
-					>
-						{debouncedBuffering ? (
-							<ActivityIndicator
-								size={mainPlayIconSize * 0.7}
-								color={colors.primary}
-							/>
-						) : (
-							<Icon
-								source={debouncedIsPlaying ? 'pause' : 'play'}
-								size={mainPlayIconSize}
-								color={primaryControlColor}
-							/>
-						)}
-					</Pressable>
-
-					<Pressable
-						onPress={handleNext}
-						hitSlop={8}
-						style={({ pressed }) => [
-							styles.transportBtn,
-							{
-								width: transportBtnSize,
-								height: transportBtnSize,
-								borderRadius: transportBtnSize / 2,
-								opacity: pressed ? 0.6 : 1,
-							},
-						]}
-						accessibilityRole='button'
-						accessibilityLabel='下一首'
-						testID='split-player-next'
-					>
-						<Icon
-							source='skip-next'
-							size={skipIconSize}
-							color={primaryControlColor}
-						/>
-					</Pressable>
+					<MainPlaybackControls
+						size={isCompactWidth ? 'compact' : 'normal'}
+						podcast={isPodcast}
+						skipSize={mainSkipSize}
+						playSize={mainPlaySize}
+						gap={mainControlsGap}
+					/>
 
 					<Pressable
 						onPress={handleOpenQueue}
@@ -741,11 +570,6 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 		borderRadius: 20,
-	},
-	playPauseBtn: {
-		alignItems: 'center',
-		justifyContent: 'center',
-		borderRadius: 999,
 	},
 	volumeSection: {
 		width: '100%',

@@ -34,6 +34,9 @@ interface MainPlaybackControlsProps {
 	size?: 'normal' | 'compact'
 	onInteraction?: () => void
 	podcast?: boolean
+	skipSize?: number
+	playSize?: number
+	gap?: number
 }
 
 /**
@@ -44,6 +47,9 @@ export function MainPlaybackControls({
 	size = 'normal',
 	onInteraction,
 	podcast = false,
+	skipSize,
+	playSize,
+	gap: gapOverride,
 }: MainPlaybackControlsProps) {
 	const { colors } = useTheme()
 	const isPlaying = useIsPlaying()
@@ -124,9 +130,14 @@ export function MainPlaybackControls({
 
 	const { width, height } = useWindowDimensions()
 	const isTabletPortrait = width >= 600 && height > width
-	const skipButtonSize = size === 'compact' ? 40 : isTabletPortrait ? 54 : 46
-	const playButtonSize = size === 'compact' ? 80 : isTabletPortrait ? 108 : 96
-	const gap = size === 'compact' ? 24 : isTabletPortrait ? 52 : 40
+	const skipButtonSize =
+		skipSize ?? (size === 'compact' ? 40 : isTabletPortrait ? 54 : 46)
+	const playButtonSize =
+		playSize ?? (size === 'compact' ? 80 : isTabletPortrait ? 108 : 96)
+	const gap =
+		gapOverride ?? (size === 'compact' ? 24 : isTabletPortrait ? 52 : 40)
+	const podcastCustomSize =
+		skipSize !== undefined ? Math.round(skipSize * 1.15) : undefined
 
 	// 我知道这 tmd 是一种究极无敌肮脏的 hack，但没办法，colorFilters 不生效啊...
 	const tintedSkipPrev = useMemo(
@@ -148,6 +159,7 @@ export function MainPlaybackControls({
 				<PodcastSeekButton
 					seconds={-15}
 					size={size}
+					customSize={podcastCustomSize}
 					onInteraction={onInteraction}
 				/>
 			) : (
@@ -229,6 +241,7 @@ export function MainPlaybackControls({
 				<PodcastSeekButton
 					seconds={15}
 					size={size}
+					customSize={podcastCustomSize}
 					onInteraction={onInteraction}
 				/>
 			) : (
@@ -267,10 +280,12 @@ export function MainPlaybackControls({
 function PodcastSeekButton({
 	seconds,
 	size,
+	customSize,
 	onInteraction,
 }: {
 	seconds: -15 | 15
 	size: 'normal' | 'compact'
+	customSize?: number
 	onInteraction?: () => void
 }) {
 	const trackId = useCurrentTrackId()
@@ -278,7 +293,7 @@ function PodcastSeekButton({
 	const { colors } = useTheme()
 	const animation = useRef<LottieView>(null)
 	const compact = size === 'compact'
-	const buttonSize = compact ? 56 : 64
+	const buttonSize = customSize ?? (compact ? 56 : 64)
 	const canSeek = !!trackId && Number.isFinite(duration) && duration > 0
 	const iconColor = canSeek ? colors.onSurfaceVariant : colors.onSurfaceDisabled
 	const source = useMemo(
@@ -290,7 +305,10 @@ function PodcastSeekButton({
 		[seconds, iconColor],
 	)
 	// The 32px animation canvas gives the rotating 24px icon room to move.
-	const animationSize = ((compact ? 32 : 36) * 32) / 24
+	const animationSize =
+		customSize !== undefined
+			? (customSize * 0.58 * 32) / 24
+			: ((compact ? 32 : 36) * 32) / 24
 	return (
 		<Touchable
 			androidRipple={{}}
