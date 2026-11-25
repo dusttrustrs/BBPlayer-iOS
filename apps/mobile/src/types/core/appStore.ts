@@ -24,6 +24,7 @@ interface Settings {
 	transparentBilibiliCard?: boolean
 	transparentBBPlayerCard?: boolean
 	enableSplitPlayerLayout?: boolean
+	enableFloatingTabBar?: boolean
 }
 
 interface BilibiliUserSummary {
