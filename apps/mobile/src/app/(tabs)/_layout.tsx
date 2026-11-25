@@ -1,4 +1,5 @@
 import type {
+	BottomTabBarProps,
 	NativeBottomTabNavigationEventMap,
 	NativeBottomTabNavigationOptions,
 } from '@bottom-tabs/react-navigation'
@@ -9,8 +10,11 @@ import type {
 	ParamListBase,
 	TabNavigationState,
 } from 'expo-router/react-navigation'
+import { useCallback } from 'react'
 import { useTheme } from 'react-native-paper'
 
+import { FloatingTabBar } from '@/components/navigation/FloatingTabBar'
+import useAppStore from '@/hooks/stores/useAppStore'
 import useSkinStore from '@/hooks/stores/useSkinStore'
 import useActiveSkin from '@/hooks/theme/useActiveSkin'
 
@@ -36,6 +40,9 @@ export default function TabLayout() {
 	const themes = useTheme().colors
 	const activeSkin = useActiveSkin()
 	const activeSkinIndex = useSkinStore((state) => state.activeSkinIndex)
+	const enableFloatingTabBar = useAppStore(
+		(state) => state.settings.enableFloatingTabBar ?? false,
+	)
 	const skinIcons = activeSkin?.skins[activeSkinIndex]?.tabBar.icons
 	const useSkinTabs = Boolean(
 		skinIcons?.home.default &&
@@ -46,8 +53,16 @@ export default function TabLayout() {
 		skinIcons.settings.selected,
 	)
 
+	const renderFloatingTabBar = useCallback(
+		(props: BottomTabBarProps) => <FloatingTabBar {...props} />,
+		[],
+	)
+
 	return (
 		<Tabs
+			screenOptions={{
+				sceneStyle: { backgroundColor: themes.background },
+			}}
 			disablePageAnimations
 			disableTintColor={useSkinTabs}
 			iconSize={useSkinTabs ? 50 : undefined}
@@ -56,6 +71,8 @@ export default function TabLayout() {
 				useSkinTabs ? 'transparent' : themes.secondaryContainer
 			}
 			tabBarStyle={{ backgroundColor: themes.elevation.level1 }}
+			floatingTabBar={enableFloatingTabBar}
+			tabBar={enableFloatingTabBar ? renderFloatingTabBar : undefined}
 			initialRouteName='index'
 		>
 			<Tabs.Screen

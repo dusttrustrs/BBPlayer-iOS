@@ -244,6 +244,11 @@ interface Props<Route extends BaseRoute> {
 	 * Whether to hide the native tab bar.
 	 */
 	tabBarHidden?: boolean
+	/**
+	 * When rendering a custom tabBar, float it as an absolute bottom overlay
+	 * instead of reserving solid flex space below the scenes.
+	 */
+	floatingTabBar?: boolean
 }
 
 const ANDROID_MAX_TABS = 100
@@ -285,6 +290,7 @@ const TabView = <Route extends BaseRoute>({
 	getFreezeOnBlur = ({ route }: { route: Route }) => route.freezeOnBlur, // oxlint-disable-line react/no-object-type-as-default-prop
 	tabBar: renderCustomTabBar,
 	tabBarHidden,
+	floatingTabBar = false,
 	tabBarStyle,
 	tabLabelStyle,
 	renderBottomAccessoryView,
@@ -295,6 +301,7 @@ const TabView = <Route extends BaseRoute>({
 	// @ts-ignore
 	const focusedKey = navigationState.routes[navigationState.index].key
 	const customTabBarWrapperRef = useRef<View>(null)
+	const nativeTabBarHeightRef = useRef<number>(0)
 	const [tabBarHeight, setTabBarHeight] = React.useState<number | undefined>(0)
 	const [measuredDimensions, setMeasuredDimensions] = React.useState<
 		{ width: DimensionValue; height: DimensionValue } | undefined
@@ -443,9 +450,12 @@ const TabView = <Route extends BaseRoute>({
 
 	const handleTabBarMeasured = React.useCallback(
 		({ nativeEvent: { height } }: { nativeEvent: OnTabBarMeasured }) => {
-			setTabBarHeight(height)
+			nativeTabBarHeightRef.current = height
+			if (!renderCustomTabBar) {
+				setTabBarHeight(height)
+			}
 		},
-		[setTabBarHeight],
+		[renderCustomTabBar, setTabBarHeight],
 	)
 
 	const handleNativeLayout = React.useCallback(
@@ -459,8 +469,12 @@ const TabView = <Route extends BaseRoute>({
 		// If we are rendering a custom tab bar, we need to measure it to set the tab bar height.
 		if (renderCustomTabBar && customTabBarWrapperRef.current) {
 			customTabBarWrapperRef.current.measure((_x, _y, _width, height) => {
-				setTabBarHeight(height)
+				if (height > 0) {
+					setTabBarHeight(height)
+				}
 			})
+		} else if (!renderCustomTabBar) {
+			setTabBarHeight(nativeTabBarHeightRef.current)
 		}
 	}, [renderCustomTabBar])
 
@@ -542,7 +556,25 @@ const TabView = <Route extends BaseRoute>({
 				) : null}
 			</NativeTabView>
 			{renderCustomTabBar ? (
-				<View ref={customTabBarWrapperRef}>{renderCustomTabBar()}</View>
+				<View
+					ref={customTabBarWrapperRef}
+					pointerEvents={floatingTabBar ? 'box-none' : 'auto'}
+					style={
+						floatingTabBar ? styles.floatingCustomTabBarWrapper : undefined
+					}
+					onLayout={
+						floatingTabBar
+							? (e) => {
+									const nextHeight = Math.round(e.nativeEvent.layout.height)
+									if (nextHeight > 0) {
+										setTabBarHeight(nextHeight)
+									}
+								}
+							: undefined
+					}
+				>
+					{renderCustomTabBar()}
+				</View>
 			) : null}
 		</BottomTabBarHeightContext.Provider>
 	)
@@ -556,6 +588,12 @@ const styles = StyleSheet.create({
 	},
 	screen: {
 		position: 'absolute',
+	},
+	floatingCustomTabBarWrapper: {
+		position: 'absolute',
+		left: 0,
+		right: 0,
+		bottom: 0,
 	},
 })
 

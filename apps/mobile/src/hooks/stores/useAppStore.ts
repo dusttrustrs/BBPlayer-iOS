@@ -149,6 +149,7 @@ export const useAppStore = create<AppState>()(
 					transparentBilibiliCard: false,
 					transparentBBPlayerCard: false,
 					enableSplitPlayerLayout: false,
+					enableFloatingTabBar: false,
 				},
 				bilibiliUserInfo: null,
 				bbplayerAccount: null,

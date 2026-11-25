@@ -46,6 +46,9 @@ export default function AppearanceSettingsPage() {
 	const enableSplitPlayerLayout = useAppStore(
 		(state) => state.settings.enableSplitPlayerLayout ?? false,
 	)
+	const enableFloatingTabBar = useAppStore(
+		(state) => state.settings.enableFloatingTabBar ?? false,
+	)
 	const pureWhiteBackground = useAppStore(
 		(state) => state.settings.pureWhiteBackground,
 	)
@@ -206,6 +209,24 @@ export default function AppearanceSettingsPage() {
 							setSettings({ transparentBBPlayerCard: value })
 						}
 						testID='transparent-bbplayer-card-switch'
+					/>
+				</View>
+				<View style={styles.settingRow}>
+					<View style={styles.settingTextContainer}>
+						<Text>悬浮底栏</Text>
+						<Text
+							variant='bodySmall'
+							style={{ color: colors.onSurfaceVariant }}
+						>
+							将底部导航栏切换为悬浮胶囊样式，自带弹性滑块指示器，默认关闭
+						</Text>
+					</View>
+					<UniversalSwitch
+						value={enableFloatingTabBar}
+						onValueChange={(value) =>
+							setSettings({ enableFloatingTabBar: value })
+						}
+						testID='floating-tab-bar-switch'
 					/>
 				</View>
 				<SettingsSectionTitle title='播放器' />

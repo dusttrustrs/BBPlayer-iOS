@@ -31,6 +31,8 @@ import SearchHistory, {
 } from '@/features/search/SearchHistory'
 import SearchSuggestions from '@/features/search/SearchSuggestions'
 import useCurrentTrack from '@/hooks/player/useCurrentTrack'
+import { useBottomTabBarHeight } from '@/hooks/router/useBottomTabBarHeight'
+import useAppStore from '@/hooks/stores/useAppStore'
 import useSkinForegroundColor from '@/hooks/theme/useSkinForegroundColor'
 import { useNowPlayingBar } from '@/hooks/ui/useNowPlayingBar'
 import { markPerfInteractive } from '@/lib/performance'
@@ -89,7 +91,12 @@ export default function SearchPage() {
 	)
 	useFocusEffect(useCallback(() => () => dismissPanel(), [dismissPanel]))
 	const [contentHeight, setContentHeight] = useState(0)
-	const contentBottomPadding = haveTrack ? 86 : 24
+	const bottomTabBarHeight = useBottomTabBarHeight()
+	const enableFloatingTabBar = useAppStore(
+		(state) => state.settings.enableFloatingTabBar ?? false,
+	)
+	const contentBottomPadding =
+		(haveTrack ? 86 : 24) + (enableFloatingTabBar ? bottomTabBarHeight : 0)
 	const { resolvedSharedPayloads, isResolving, clearSharedPayloads } =
 		useIncomingShare()
 	const { markInteractive } = useObserve()
