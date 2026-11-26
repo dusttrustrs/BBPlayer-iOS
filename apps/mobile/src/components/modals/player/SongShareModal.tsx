@@ -4,8 +4,9 @@ import { Image, useImage } from 'expo-image'
 import * as MediaLibrary from 'expo-media-library'
 import * as Sharing from 'expo-sharing'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Dialog, Text, useTheme } from 'react-native-paper'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { captureRef, ViewShotRef } from 'react-native-view-shot'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
@@ -90,6 +91,14 @@ async function performShare(
 const SongShareModal = () => {
 	const currentTrack = useCurrentTrack()
 	const close = useModalStore((state) => state.close)
+	const insets = useSafeAreaInsets()
+	const { width: windowWidth, height: windowHeight } = useWindowDimensions()
+	const isLandscape = windowWidth > windowHeight
+	const maxDialogHeight = Math.max(
+		220,
+		windowHeight - insets.top - insets.bottom - (isLandscape ? 20 : 48),
+	)
+	const previewHeight = Math.min(520, Math.max(140, maxDialogHeight - 164))
 
 	const theme = useTheme()
 	const [permissionResponse, requestPermission] = MediaLibrary.usePermissions()
@@ -279,7 +288,7 @@ const SongShareModal = () => {
 				) : previewUri ? (
 					<Image
 						source={{ uri: previewUri }}
-						style={styles.previewImage}
+						style={[styles.previewImage, { height: previewHeight }]}
 						contentFit='contain'
 					/>
 				) : (
@@ -300,7 +309,7 @@ const SongShareModal = () => {
 					</View>
 				)}
 			</Dialog.Content>
-			<Dialog.Actions>
+			<Dialog.Actions style={styles.actions}>
 				<Button
 					mode='outlined'
 					onPress={() => handleShare('save')}
@@ -343,17 +352,20 @@ const SongShareModal = () => {
 const styles = StyleSheet.create({
 	contentArea: {
 		paddingHorizontal: 16,
-		minHeight: 280,
+		paddingBottom: 8,
 	},
 	previewImage: {
 		width: '100%',
-		aspectRatio: 0.7,
 		borderRadius: 12,
+	},
+	actions: {
+		flexWrap: 'wrap',
+		gap: 4,
 	},
 	loadingContainer: {
 		alignItems: 'center',
 		justifyContent: 'center',
-		paddingVertical: 80,
+		paddingVertical: 48,
 	},
 	loadingText: {
 		marginTop: 16,
