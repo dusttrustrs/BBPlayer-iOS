@@ -6,22 +6,118 @@ import { Image, useImage } from 'expo-image'
 import * as MediaLibrary from 'expo-media-library'
 import * as Sharing from 'expo-sharing'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
-import { Dialog, Text, TouchableRipple, useTheme } from 'react-native-paper'
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
+import {
+	Dialog,
+	Icon,
+	Text,
+	TouchableRipple,
+	useTheme,
+} from 'react-native-paper'
+import Animated, {
+	interpolateColor,
+	useAnimatedStyle,
+	useSharedValue,
+	withSequence,
+	withSpring,
+	withTiming,
+} from 'react-native-reanimated'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { captureRef, ViewShotRef } from 'react-native-view-shot'
 
 import ActivityIndicator from '@/components/common/ActivityIndicator'
 import Button from '@/components/common/Button'
-import UniversalCheckbox from '@/components/common/UniversalCheckbox'
 import { LyricsShareCard } from '@/features/player/components/sharing/LyricsShareCard'
 import { useCurrentTrack } from '@/hooks/player/useCurrentTrack'
 import { useGetMultiPageList } from '@/hooks/queries/bilibili/video'
 import { useSmartFetchLyrics } from '@/hooks/queries/lyrics'
 import { useModalStore } from '@/hooks/stores/useModalStore'
 import type { ModalPropsMap } from '@/types/navigation'
+import * as Haptics from '@/utils/haptics'
 import { resolveTrackCover } from '@/utils/imageUrl'
 import log, { reportErrorToSentry } from '@/utils/log'
 import toast from '@/utils/toast'
+
+const AnimatedLyricCheckbox = memo(function AnimatedLyricCheckbox({
+	checked,
+	onPress,
+	primaryColor,
+	onPrimaryColor,
+	outlineColor,
+}: {
+	checked: boolean
+	onPress: () => void
+	primaryColor: string
+	onPrimaryColor: string
+	outlineColor: string
+}) {
+	const progress = useSharedValue(checked ? 1 : 0)
+	const pulse = useSharedValue(1)
+
+	useEffect(() => {
+		progress.set(
+			withSpring(checked ? 1 : 0, {
+				damping: 16,
+				stiffness: 280,
+				mass: 0.7,
+			}),
+		)
+		if (checked) {
+			pulse.set(
+				withSequence(
+					withTiming(1.16, { duration: 110 }),
+					withSpring(1, { damping: 14, stiffness: 300 }),
+				),
+			)
+		} else {
+			pulse.set(
+				withSequence(
+					withTiming(0.88, { duration: 90 }),
+					withSpring(1, { damping: 16, stiffness: 280 }),
+				),
+			)
+		}
+	}, [checked, progress, pulse])
+
+	const circleStyle = useAnimatedStyle(() => ({
+		transform: [{ scale: pulse.value }],
+		backgroundColor: interpolateColor(
+			progress.value,
+			[0, 1],
+			['rgba(0,0,0,0)', primaryColor],
+		),
+		borderColor: interpolateColor(
+			progress.value,
+			[0, 1],
+			[outlineColor, primaryColor],
+		),
+	}))
+
+	const checkStyle = useAnimatedStyle(() => ({
+		opacity: progress.value,
+		transform: [{ scale: 0.4 + 0.6 * progress.value }],
+	}))
+
+	return (
+		<Pressable
+			onPress={onPress}
+			hitSlop={8}
+			style={styles.checkboxHitArea}
+			accessibilityRole='checkbox'
+			accessibilityState={{ checked }}
+		>
+			<Animated.View style={[styles.checkboxCircle, circleStyle]}>
+				<Animated.View style={checkStyle}>
+					<Icon
+						source='check'
+						size={14}
+						color={onPrimaryColor}
+					/>
+				</Animated.View>
+			</Animated.View>
+		</Pressable>
+	)
+})
 
 const LyricItem = memo(function LyricItem({
 	item,
@@ -29,6 +125,8 @@ const LyricItem = memo(function LyricItem({
 	isSelected,
 	onToggle,
 	primaryColor,
+	onPrimaryColor,
+	outlineColor,
 	onSurfaceColor,
 	onSurfaceVariantColor,
 }: {
@@ -37,6 +135,8 @@ const LyricItem = memo(function LyricItem({
 	isSelected: boolean
 	onToggle: (index: number) => void
 	primaryColor: string
+	onPrimaryColor: string
+	outlineColor: string
 	onSurfaceColor: string
 	onSurfaceVariantColor: string
 }) {
@@ -64,9 +164,12 @@ const LyricItem = memo(function LyricItem({
 						</Text>
 					)}
 				</View>
-				<UniversalCheckbox
-					status={isSelected ? 'checked' : 'unchecked'}
+				<AnimatedLyricCheckbox
+					checked={isSelected}
 					onPress={() => onToggle(index)}
+					primaryColor={primaryColor}
+					onPrimaryColor={onPrimaryColor}
+					outlineColor={outlineColor}
 				/>
 			</View>
 		</TouchableRipple>
@@ -144,6 +247,15 @@ const LyricsSelectionModal = () => {
 	const theme = useTheme()
 	const currentTrack = useCurrentTrack()
 	const close = useModalStore((state) => state.close)
+	const insets = useSafeAreaInsets()
+	const { width: windowWidth, height: windowHeight } = useWindowDimensions()
+	const isLandscape = windowWidth > windowHeight
+	const maxDialogHeight = Math.max(
+		220,
+		windowHeight - insets.top - insets.bottom - (isLandscape ? 20 : 48),
+	)
+	const previewHeight = Math.min(520, Math.max(140, maxDialogHeight - 164))
+	const listHeight = Math.min(360, Math.max(130, maxDialogHeight - 168))
 
 	const {
 		data: lyricsData,
@@ -253,6 +365,7 @@ const LyricsSelectionModal = () => {
 	}, [imageRef, theme.colors.elevation.level3, theme.dark])
 
 	const toggleSelection = useCallback((index: number) => {
+		void Haptics.performHaptics(Haptics.AndroidHaptics.Context_Click)
 		setSelectedIndices((prev) => {
 			const newSelected = new Set(prev)
 			if (newSelected.has(index)) {
@@ -327,21 +440,37 @@ const LyricsSelectionModal = () => {
 	}
 
 	const renderItem = useCallback(
-		({ item, index }: { item: LyricLine; index: number }) => (
-			<LyricItem
-				item={item}
-				index={index}
-				isSelected={selectedIndices.has(index)}
-				onToggle={toggleSelection}
-				primaryColor={theme.colors.primary}
-				onSurfaceColor={theme.colors.onSurface}
-				onSurfaceVariantColor={theme.colors.onSurfaceVariant}
-			/>
-		),
+		({
+			item,
+			index,
+			extraData,
+		}: {
+			item: LyricLine
+			index: number
+			extraData?: unknown
+		}) => {
+			const activeSet =
+				extraData instanceof Set ? (extraData as Set<number>) : selectedIndices
+			return (
+				<LyricItem
+					item={item}
+					index={index}
+					isSelected={activeSet.has(index)}
+					onToggle={toggleSelection}
+					primaryColor={theme.colors.primary}
+					onPrimaryColor={theme.colors.onPrimary}
+					outlineColor={theme.colors.outline}
+					onSurfaceColor={theme.colors.onSurface}
+					onSurfaceVariantColor={theme.colors.onSurfaceVariant}
+				/>
+			)
+		},
 		[
 			selectedIndices,
+			theme.colors.onPrimary,
 			theme.colors.onSurface,
 			theme.colors.onSurfaceVariant,
+			theme.colors.outline,
 			theme.colors.primary,
 			toggleSelection,
 		],
@@ -451,7 +580,7 @@ const LyricsSelectionModal = () => {
 				<Dialog.Content style={styles.previewContentArea}>
 					<Image
 						source={{ uri: previewUri }}
-						style={styles.previewImage}
+						style={[styles.previewImage, { height: previewHeight }]}
 						contentFit='contain'
 					/>
 				</Dialog.Content>
@@ -491,9 +620,10 @@ const LyricsSelectionModal = () => {
 	return (
 		<>
 			<Dialog.Title>选择歌词分享 ({selectedIndices.size}/5)</Dialog.Title>
-			<Dialog.ScrollArea style={styles.scrollArea}>
+			<Dialog.ScrollArea style={{ height: listHeight }}>
 				<LegendList
 					data={lyrics}
+					extraData={selectedIndices}
 					keyExtractor={keyExtractor}
 					renderItem={renderItem}
 					recycleItems
@@ -553,14 +683,24 @@ const LyricsSelectionModal = () => {
 }
 
 const styles = StyleSheet.create({
-	scrollArea: {
-		height: 350,
-	},
 	itemContainer: {
 		flexDirection: 'row',
 		alignItems: 'center',
+		gap: 12,
 		paddingHorizontal: 16,
 		paddingVertical: 10,
+	},
+	checkboxHitArea: {
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	checkboxCircle: {
+		width: 22,
+		height: 22,
+		borderRadius: 11,
+		borderWidth: 2,
+		alignItems: 'center',
+		justifyContent: 'center',
 	},
 	actions: {
 		flexWrap: 'wrap',
@@ -568,11 +708,10 @@ const styles = StyleSheet.create({
 	},
 	previewContentArea: {
 		paddingHorizontal: 16,
-		minHeight: 200,
+		paddingBottom: 8,
 	},
 	previewImage: {
 		width: '100%',
-		aspectRatio: 0.8,
 		borderRadius: 12,
 	},
 	loadingContainer: {
